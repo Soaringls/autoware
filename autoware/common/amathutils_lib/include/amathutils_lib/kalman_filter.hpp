@@ -156,7 +156,7 @@ public:
   bool predict(const Eigen::MatrixXd &x_next, const Eigen::MatrixXd &A);
 
   /**
-   * @brief calculate kalman filter state by prediction model with A, B and Q being class menber variables.
+   * @brief calculate kalman filter state by prediction model with A, B and Q being class member variables.
    * @param u input for the model
    * @return bool to check matrix operations are being performed properly
    */
@@ -184,7 +184,7 @@ public:
               const Eigen::MatrixXd &R);
 
   /**
-   * @brief calculate kalman filter state by measurement model with C and R being class menber variables.
+   * @brief calculate kalman filter state by measurement model with C and R being class member variables.
    * @param y measured values
    * @return bool to check matrix operations are being performed properly
    */

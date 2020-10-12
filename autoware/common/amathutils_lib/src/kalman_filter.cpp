@@ -66,6 +66,39 @@ void KalmanFilter::getX(Eigen::MatrixXd &x) { x = x_; }
 void KalmanFilter::getP(Eigen::MatrixXd &P) { P = P_; }
 double KalmanFilter::getXelement(unsigned int i) { return x_(i); }
 
+
+/*
+ * predict1
+ * @input: u,  using default:A_, B_, Q_
+ */ 
+bool KalmanFilter::predict(const Eigen::MatrixXd &u) { return predict(u, A_, B_, Q_); }
+
+/*
+ * predict2--invoke by predict1 Or invoke indepent
+ */ 
+bool KalmanFilter::predict(const Eigen::MatrixXd &u, const Eigen::MatrixXd &A,
+                           const Eigen::MatrixXd &B, const Eigen::MatrixXd &Q)
+{
+  if (A.cols() != x_.rows() || B.cols() != u.rows())
+  {
+    return false;
+  }
+  const Eigen::MatrixXd x_next = A * x_ + B * u;
+  return predict(x_next, A, Q);
+}
+
+/*
+ * predict3--invoke by predict2
+ */ 
+bool KalmanFilter::predict(const Eigen::MatrixXd &x_next,
+                           const Eigen::MatrixXd &A)
+{
+  return predict(x_next, A, Q_);
+}
+
+/*
+ * predict4--invoke by predict3
+ */ 
 bool KalmanFilter::predict(const Eigen::MatrixXd &x_next,
                            const Eigen::MatrixXd &A,
                            const Eigen::MatrixXd &Q)
@@ -79,24 +112,31 @@ bool KalmanFilter::predict(const Eigen::MatrixXd &x_next,
   P_ = A * P_ * A.transpose() + Q;
   return true;
 }
-bool KalmanFilter::predict(const Eigen::MatrixXd &x_next,
-                           const Eigen::MatrixXd &A)
-{
-  return predict(x_next, A, Q_);
-}
 
-bool KalmanFilter::predict(const Eigen::MatrixXd &u, const Eigen::MatrixXd &A,
-                           const Eigen::MatrixXd &B, const Eigen::MatrixXd &Q)
+
+/*
+ * update1--invoke by predict3
+ * @input: y,  using default:C_, R_
+ */ 
+bool KalmanFilter::update(const Eigen::MatrixXd &y) { return update(y, C_, R_); }
+
+/*
+ * update2--invoke by update1 Or invoke indepent
+ */ 
+bool KalmanFilter::update(const Eigen::MatrixXd &y, const Eigen::MatrixXd &C,
+                          const Eigen::MatrixXd &R)
 {
-  if (A.cols() != x_.rows() || B.cols() != u.rows())
+  if (C.cols() != x_.rows())
   {
     return false;
   }
-  const Eigen::MatrixXd x_next = A * x_ + B * u;
-  return predict(x_next, A, Q);
+  const Eigen::MatrixXd y_pred = C * x_;
+  return update(y, y_pred, C, R);
 }
-bool KalmanFilter::predict(const Eigen::MatrixXd &u) { return predict(u, A_, B_, Q_); }
 
+/*
+ * update3--invoke by update2
+ */
 bool KalmanFilter::update(const Eigen::MatrixXd &y,
                           const Eigen::MatrixXd &y_pred,
                           const Eigen::MatrixXd &C,
@@ -119,15 +159,3 @@ bool KalmanFilter::update(const Eigen::MatrixXd &y,
   P_ = P_ - K * (C * P_);
   return true;
 }
-
-bool KalmanFilter::update(const Eigen::MatrixXd &y, const Eigen::MatrixXd &C,
-                          const Eigen::MatrixXd &R)
-{
-  if (C.cols() != x_.rows())
-  {
-    return false;
-  }
-  const Eigen::MatrixXd y_pred = C * x_;
-  return update(y, y_pred, C, R);
-}
-bool KalmanFilter::update(const Eigen::MatrixXd &y) { return update(y, C_, R_); }
