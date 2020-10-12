@@ -156,13 +156,31 @@ public:
   bool predict(const Eigen::MatrixXd &x_next, const Eigen::MatrixXd &A);
 
   /**
-   * @brief calculate kalman filter state by prediction model with A, B and Q being class menber variables.
+   * @brief calculate kalman filter state by prediction model with A, B and Q being class member variables.
    * @param u input for the model
    * @return bool to check matrix operations are being performed properly
    */
   bool predict(const Eigen::MatrixXd &u);
+  
 
-  /**
+  /** update1
+   * @brief calculate kalman filter state by measurement model with C and R being class member variables.
+   * @param y measured values
+   * @return bool to check matrix operations are being performed properly
+   */
+  bool update(const Eigen::MatrixXd &y);
+  
+  /** update2--invoke by update1 Or invoke indepent
+   * @brief calculate kalman filter state by measurement model with C and R matrix. This is mainly for EKF with variable matrix.
+   * @param y measured values
+   * @param C coefficient matrix of x for measurement model
+   * @param R covariance matrix for measurement model
+   * @return bool to check matrix operations are being performed properly
+   */
+  bool update(const Eigen::MatrixXd &y, const Eigen::MatrixXd &C,
+              const Eigen::MatrixXd &R);
+
+  /** update3--invoke by update2
    * @brief calculate kalman filter state by measurement model with y_pred, C and R matrix. This is mainly for EKF with variable matrix.
    * @param y measured values
    * @param y output values expected from measurement model
@@ -173,22 +191,6 @@ public:
   bool update(const Eigen::MatrixXd &y, const Eigen::MatrixXd &y_pred,
               const Eigen::MatrixXd &C, const Eigen::MatrixXd &R);
 
-  /**
-   * @brief calculate kalman filter state by measurement model with C and R matrix. This is mainly for EKF with variable matrix.
-   * @param y measured values
-   * @param C coefficient matrix of x for measurement model
-   * @param R covariance matrix for measurement model
-   * @return bool to check matrix operations are being performed properly
-   */
-  bool update(const Eigen::MatrixXd &y, const Eigen::MatrixXd &C,
-              const Eigen::MatrixXd &R);
-
-  /**
-   * @brief calculate kalman filter state by measurement model with C and R being class menber variables.
-   * @param y measured values
-   * @return bool to check matrix operations are being performed properly
-   */
-  bool update(const Eigen::MatrixXd &y);
 
 protected:
   Eigen::MatrixXd x_;  //!< @brief current estimated state

@@ -67,7 +67,7 @@ void Nmea2TFPoseNode::publishPoseStamped()
   pose.pose.position.y = geo_.x();
   pose.pose.position.z = geo_.z();
   pose.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(roll_, pitch_, yaw_);
-  pub1_.publish(pose);
+  pub1_.publish(pose);//pub-topic:"gnss_pose"
 }
 
 void Nmea2TFPoseNode::publishTF()

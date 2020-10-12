@@ -38,8 +38,10 @@ void TimeDelayKalmanFilter::init(const Eigen::MatrixXd &x, const Eigen::MatrixXd
 void TimeDelayKalmanFilter::getLatestX(Eigen::MatrixXd &x) { x = x_.block(0, 0, dim_x_, 1); }
 void TimeDelayKalmanFilter::getLatestP(Eigen::MatrixXd &P) { P = P_.block(0, 0, dim_x_, dim_x_); }
 
-bool TimeDelayKalmanFilter::predictWithDelay(const Eigen::MatrixXd &x_next, const Eigen::MatrixXd &A,
-                                             const Eigen::MatrixXd &Q)
+//predict mainly
+bool TimeDelayKalmanFilter::predictWithDelay(const Eigen::MatrixXd &x_next,//6*1
+                                             const Eigen::MatrixXd &A,//6*6
+                                             const Eigen::MatrixXd &Q)//6*6
 {
 /*
  * time delay model:
@@ -54,8 +56,8 @@ bool TimeDelayKalmanFilter::predictWithDelay(const Eigen::MatrixXd &x_next, cons
  * P = [     P11*A'    P11    P12]
  *     [     P21*A'    P21    P22]
  */
-
-  const int d_dim_x = dim_x_ex_ - dim_x_;
+  //dim_x_ex_ length=dim*step
+  const int d_dim_x = dim_x_ex_ - dim_x_;//d_dim_x: length=dim*(step - 1)
 
   /* slide states in the time direction */
   Eigen::MatrixXd x_tmp = Eigen::MatrixXd::Zero(dim_x_ex_, 1);
@@ -74,8 +76,16 @@ bool TimeDelayKalmanFilter::predictWithDelay(const Eigen::MatrixXd &x_next, cons
   return true;
 }
 
-bool TimeDelayKalmanFilter::updateWithDelay(const Eigen::MatrixXd &y, const Eigen::MatrixXd &C,
-                                            const Eigen::MatrixXd &R, const int delay_step)
+//update mainly
+/*
+ * @y measurement value
+ * @C coefficient of x for measurement model
+ * @R covariance of measurement model
+ */ 
+bool TimeDelayKalmanFilter::updateWithDelay(const Eigen::MatrixXd &y, //pose: 3*1 twist:2*1
+                                            const Eigen::MatrixXd &C, //pose: 3*6 twist:2*6
+                                            const Eigen::MatrixXd &R, //pose: 3*3 twist:2*2
+                                            const int delay_step)
 {
   if (delay_step >= max_delay_step_)
   {
@@ -85,12 +95,12 @@ bool TimeDelayKalmanFilter::updateWithDelay(const Eigen::MatrixXd &y, const Eige
 
   const int dim_y = y.rows();
 
-  /* set measurement matrix */
-  Eigen::MatrixXd C_ex = Eigen::MatrixXd::Zero(dim_y, dim_x_ex_);
+  /* set coefficient of measurement matrix */
+  Eigen::MatrixXd C_ex = Eigen::MatrixXd::Zero(dim_y, dim_x_ex_);//3|2 * dim_x_ex_(6*step)
   C_ex.block(0, dim_x_ * delay_step, dim_y, dim_x_) = C;
 
   /* update */
-  if (!update(y, C_ex, R))
+  if (!update(y, C_ex, R))//invoke update2 of base class
     return false;
 
   return true;
