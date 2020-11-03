@@ -12,7 +12,9 @@ rosdep install -y --from-paths src --ignore-src --rosdistro $ROS_DISTRO
 AUTOWARE_COMPILE_WITH_CUDA=1 colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 ## compile without cuda support
-colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Debug Release
 
 ## compile particular module
 colcon build --packages-select ekf_localizer
+
+rviz -d ./data/ces_mapping.rviz 

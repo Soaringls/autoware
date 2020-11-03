@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.3)
+  cmake_minimum_required(VERSION 2.8.3)
 project(lidar_localizer)
 
 find_package(PCL REQUIRED)
@@ -18,7 +18,7 @@ find_package(Eigen3 QUIET)
 find_package(autoware_build_flags REQUIRED)
 
 AW_CHECK_CUDA()
-
+set(USE_CUDA False)
 if(USE_CUDA)
   add_definitions(-DCUDA_FOUND)
   list(APPEND PCL_OPENMP_PACKAGES ndt_gpu)
@@ -51,6 +51,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   tf
   velodyne_pointcloud
+  message_filters
 )
 
 catkin_package(
@@ -67,7 +68,16 @@ catkin_package(
   DEPENDS PCL
 )
 
+find_package(Ceres REQUIRED)
+find_package(libpointmatcher REQUIRED)
+
+find_package(yaml-cpp REQUIRED)
+# include_directories(${YAMLCPP_INCLUDE_DIR})
+# link_directories(${YAMLCPP_LIBRARY_DIRS})
 include_directories(
+  ${CERES_INCLUDE_DIRS}
+  ${YAMLCPP_INCLUDE_DIR}
+  ${libpointmatcher_INCLUDE_DIRS}
   include
   ${catkin_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
@@ -134,11 +144,26 @@ add_executable(icp_matching nodes/icp_matching/icp_matching.cpp)
 target_link_libraries(icp_matching ${catkin_LIBRARIES})
 add_dependencies(icp_matching ${catkin_EXPORTED_TARGETS})
 
+add_executable(ceres_mapping nodes/ndt_mapping/mapping.cpp
+                             nodes/ndt_mapping/ceres_optimizer.cpp
+                             nodes/ndt_mapping/align_pointmatcher.cc            
+              )
+message(STATUS "+++++++++++++++++++++:${libpointmatcher_LIBRARIES}")
+target_link_libraries(ceres_mapping 
+     ${catkin_LIBRARIES} ${CERES_LIBRARIES} ${libpointmatcher_LIBRARIES}
+     yaml-cpp
+     "/usr/local/lib/libpointmatcher.so.1.3.1"
+     "/usr/local/lib/libpointmatcher.so.1"
+     "/usr/local/lib/libpointmatcher.so"
+)
+add_dependencies(ceres_mapping ${catkin_EXPORTED_TARGETS})
+
 install(
   TARGETS
     approximate_ndt_mapping
     icp_matching
     mapping
+    ceres_mapping
     ndt_mapping
     ndt_mapping_tku
     ndt_matching

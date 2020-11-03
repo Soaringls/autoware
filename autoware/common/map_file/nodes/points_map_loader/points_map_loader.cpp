@@ -515,8 +515,9 @@ int main(int argc, char** argv)
         }
       }
     }
+    std::cout<<"map_pcd_file:"<<pcd_file_paths.back()<<std::endl;
   }
-
+  std::cout<<"param area:"<<area<<std::endl;
   if (area == "noupdate")
     margin = -1;
   else if (area == "1x1")

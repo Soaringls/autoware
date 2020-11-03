@@ -436,7 +436,9 @@ static void map_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
 
     // Convert the data type(from sensor_msgs to pcl).
     pcl::fromROSMsg(*input, map);
-
+    // for(const auto& pt : map.points){
+    //   std::cout<<"pt: x:"<<pt.x<<" y:"<<pt.y<<" pt.z:"<<pt.z<<std::endl;
+    // }
     if (_use_local_transform == true)
     {
       tf::TransformListener local_transform_listener;
