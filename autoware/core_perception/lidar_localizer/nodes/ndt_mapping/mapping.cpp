@@ -27,8 +27,8 @@
 #include <autoware_config_msgs/ConfigNDTMapping.h>
 #include <autoware_config_msgs/ConfigNDTMappingOutput.h>
 
-#include "ceres_optimizer.h"
-#include "align_pointmatcher.h"
+#include "base_impl/ceres_optimizer.h"
+#include "base_impl/align_pointmatcher.h"
 
 
 typedef pcl::PointXYZI PointT;

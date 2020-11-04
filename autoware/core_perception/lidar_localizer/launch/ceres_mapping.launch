@@ -42,6 +42,7 @@
     <!-- registration params -->
     <param name="method_type" value="4" /> 
     <!-- <param name="method_type" value="0" /> -->
+    <param name="segment_config_file" value="/autoware/workspace/data/params/lidar_odometry_config.yaml" />
     <param name="icp_config_file" value="/autoware/workspace/data/params/libpointmatcher_config.p2plane.yaml" />
     <!-- <param name="icp_config_file" value="/autoware/workspace/data/params/libpointmatcher_config.p2p.yaml" /> -->
     <param name="ndt_trans_epsilon" value="$(arg ndt_trans_epsilon)" />

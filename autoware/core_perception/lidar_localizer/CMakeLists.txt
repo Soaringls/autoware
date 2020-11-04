@@ -70,7 +70,7 @@ catkin_package(
 
 find_package(Ceres REQUIRED)
 find_package(libpointmatcher REQUIRED)
-
+find_package(Boost REQUIRED)
 find_package(yaml-cpp REQUIRED)
 # include_directories(${YAMLCPP_INCLUDE_DIR})
 # link_directories(${YAMLCPP_LIBRARY_DIRS})
@@ -79,6 +79,7 @@ include_directories(
   ${YAMLCPP_INCLUDE_DIR}
   ${libpointmatcher_INCLUDE_DIRS}
   include
+  ${Boost_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
 )
@@ -145,13 +146,16 @@ target_link_libraries(icp_matching ${catkin_LIBRARIES})
 add_dependencies(icp_matching ${catkin_EXPORTED_TARGETS})
 
 add_executable(ceres_mapping nodes/ndt_mapping/mapping.cpp
-                             nodes/ndt_mapping/ceres_optimizer.cpp
-                             nodes/ndt_mapping/align_pointmatcher.cc            
+                             nodes/ndt_mapping/base_impl/ceres_optimizer.cpp
+                             nodes/ndt_mapping/base_impl/align_pointmatcher.cc            
+                             nodes/ndt_mapping/base_impl/config_loader.cc
+                             nodes/ndt_mapping/base_impl/lidar_segmentation.cc
               )
-message(STATUS "+++++++++++++++++++++:${libpointmatcher_LIBRARIES}")
+              
 target_link_libraries(ceres_mapping 
      ${catkin_LIBRARIES} ${CERES_LIBRARIES} ${libpointmatcher_LIBRARIES}
      yaml-cpp
+     ${Boost_LIBRARIES}
      "/usr/local/lib/libpointmatcher.so.1.3.1"
      "/usr/local/lib/libpointmatcher.so.1"
      "/usr/local/lib/libpointmatcher.so"
