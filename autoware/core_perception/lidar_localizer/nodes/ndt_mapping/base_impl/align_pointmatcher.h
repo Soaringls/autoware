@@ -5,7 +5,7 @@
 #include <pcl/point_types.h>
 #include <pointmatcher/Parametrizable.h>
 #include <pointmatcher/PointMatcher.h>
-
+#include <glog/logging.h>
 #include <Eigen/Dense>
 #include <boost/circular_buffer.hpp>
 #include <boost/filesystem.hpp>

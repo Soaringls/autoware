@@ -29,6 +29,7 @@
 
 #include "base_impl/ceres_optimizer.h"
 #include "base_impl/align_pointmatcher.h"
+#include "base_impl/lidar_segmentation.h"
 
 
 typedef pcl::PointXYZI PointT;
@@ -51,7 +52,9 @@ struct Config{
     double distance_far_thresh = 50;
     double voxel_filter_size = 0.2;
     //registeration params
+    double frame_dist = 0.1;
     MethodType register_method_type = MethodType::PCL_GENERIC;
+    std::string seg_config_file;
     std::string icp_config_file;
     double ndt_trans_epsilon = 0.01;
     double ndt_step_size = 0.1;
@@ -77,29 +80,29 @@ typedef std::shared_ptr<KeyFrame> KeyFramePtr;
 typedef std::shared_ptr<const KeyFrame> KeyFrameConstPtr;
 
 //global variables
-visualization_msgs::MarkerArray marker_array;
+static PointCloud map_autoware;
+std::mutex gps_mutex, keyframe_mutex;
+Eigen::Affine3d init_pose =  Eigen::Affine3d::Identity();
+
 std::queue<geometry_msgs::PoseStamped::ConstPtr> gps_msgs;
+pcl::VoxelGrid<PointT> voxel_filter;
 std::vector<KeyFramePtr> key_frame_ptrs;
-nav_msgs::Path *optimized_path, gps_path, odom_path;
+
+pcl::NormalDistributionsTransform<PointT, PointT> ndt_matching;
+AlignPointMatcher::Ptr align_pointmatcher_ptr;
+CeresOptimizer ceres_optimizer;
+ceres_mapping::lidar_odom::LidarSegmentationPtr lidar_segmentation_ptr;
+
+visualization_msgs::MarkerArray marker_array;
+
 //publisher
-ros::Publisher gps_pose_pub, odom_pose_pub, pose_pub;
+ros::Publisher ins_pos_pub, lio_pos_pub, optimized_pos_pub;
 ros::Publisher pub_filtered, pub_map;
 
 
-CeresOptimizer ceres_optimizer;
-pcl::VoxelGrid<PointT> voxel_filter;
-AlignPointMatcher align_pointmatcher(config.icp_config_file);
-pcl::NormalDistributionsTransform<PointT, PointT> ndt_matching;
 #ifdef CUDA_FOUND
 static gpu::GNormalDistributionsTransform ndt_gpu;
 #endif
-
-static PointCloud map;
-static Eigen::Matrix4d guess_odom = Eigen::Matrix4d::Identity();
-
-std::mutex gps_mutex, keyframe_mutex;
-bool init_pose_flag = false;
-Eigen::Affine3d init_pose =  Eigen::Affine3d::Identity();
 
 //todo
 void PublisherVisualiztion(ros::Publisher& pub, POSEPtr pose, int color[],
@@ -131,28 +134,20 @@ Eigen::Isometry3d Matrix2Isometry(const Eigen::Matrix4d matrix) {
   return isometry;
 }
 
-void GNSSCallback(const geometry_msgs::PoseStamped::ConstPtr &msgs){
-   static std::size_t flag(0);
+void InsCallback(const geometry_msgs::PoseStamped::ConstPtr &msgs){
    gps_mutex.lock();
    if(gps_msgs.size() > 16000) gps_msgs.pop();
    gps_msgs.push(msgs);
    gps_mutex.unlock();
 
-   flag++;
-   POSEPtr gps_pose(new POSE);
-   gps_pose->time = msgs->header.stamp.toSec();
-   gps_pose->pos = Eigen::Vector3d(msgs->pose.position.x,msgs->pose.position.y,msgs->pose.position.z);
-   gps_pose->q = Eigen::Quaterniond(msgs->pose.orientation.w, msgs->pose.orientation.x, msgs->pose.orientation.y, msgs->pose.orientation.z);
-//    ROS_INFO_STREAM("--gps Callback:"<<std::fixed<<std::setprecision(6)<<flag);
-                //    <<" pos: "<<gps_pose->pos[0]<<", "<<gps_pose->pos[1]<<", "<<gps_pose->pos[2]);
-   
-   ceres_optimizer.AddPoseToNavPath(gps_path, gps_pose);
-   gps_pose_pub.publish(gps_path);
-//    ROS_INFO_STREAM("Path's pose of gps: "<<gps_path.poses.size());
+   POSEPtr ins_factor(new POSE);
+   ins_factor->time = msgs->header.stamp.toSec();
+   ins_factor->pos = Eigen::Vector3d(msgs->pose.position.x,msgs->pose.position.y,msgs->pose.position.z);
+   ins_factor->q = Eigen::Quaterniond(msgs->pose.orientation.w, msgs->pose.orientation.x, msgs->pose.orientation.y, msgs->pose.orientation.z);
 
-   auto temp = Eigen::Translation3d(gps_pose->pos.x(),gps_pose->pos.y(),gps_pose->pos.z())
-                * gps_pose->q;
-   guess_odom = temp.matrix();
+   static nav_msgs::Path gps_path;
+   ceres_optimizer.AddPoseToNavPath(gps_path, ins_factor);
+   ins_pos_pub.publish(gps_path);
 }
 
 PointCloudPtr FilterCloudFrame(PointCloudPtr &input, const double leaf_size){
@@ -168,6 +163,7 @@ PointCloudPtr FilterCloudFrame(PointCloudPtr &input, const double leaf_size){
         filtered->push_back(pt);
     }
     // ROS_INFO_STREAM("filter_nan=====2:"<<filtered->size());
+
     //voxel filter
     PointCloudPtr voxel_filtered_pts(new PointCloud);
     voxel_filter.setLeafSize(leaf_size, leaf_size, leaf_size);
@@ -182,6 +178,7 @@ PointCloudPtr FilterCloudFrame(PointCloudPtr &input, const double leaf_size){
           return dist > config.distance_near_thresh && dist < config.distance_far_thresh;
       }
     );
+
     filtered->header = input->header;
     SetCloudAttributes(filtered);
 
@@ -198,11 +195,11 @@ void AddKeyFrame(const Eigen::Matrix4d& tf, const Eigen::Matrix4d& pose, const P
     pcl::toROSMsg(*current_frame, *output);
     pub_filtered.publish(output);
  
-    static Eigen::Matrix4d last_keyframe_pose = pose;
-    auto tf_keyframe = last_keyframe_pose * tf;
+    static Eigen::Matrix4d pre_keyframe_pos = pose;
+    auto tf_keyframe = pre_keyframe_pos * tf;
     auto distance = tf_keyframe.block<3,1>(0,3).norm();
     if(distance < config.keyframe_delta_trans) return;
-    last_keyframe_pose = pose;
+    pre_keyframe_pos = pose;
     CHECK_NOTNULL(cloud);
     Eigen::Isometry3d key_pose = Eigen::Isometry3d::Identity();
     key_pose.linear() = pose.block<3,3>(0,0);
@@ -223,12 +220,6 @@ PointCloudPtr GenerateMap(double resolution = 0.05){
     auto init_pos = Matrix2Isometry(init_pose.matrix());
     for(const auto& frame : key_frame_ptrs){
         Eigen::Isometry3d pose = (init_pos.inverse()) * frame->pose;//local coordinate system
-        // for(const auto& src_pt : frame->cloud->points){
-        //     PointT pt;
-        //     pt.getVector4fMap() = pose.matrix() * src_pt.getVector4fMap();
-        //     pt.intensity = src_pt.intensity;
-        //     map_cloud->push_back(pt);
-        // }
         PointCloudPtr temp_cloud(new PointCloud);
         pcl::transformPointCloud(*(frame->cloud), *temp_cloud, pose.matrix());
         *map_cloud += *temp_cloud;
@@ -255,15 +246,11 @@ bool RegisterPointCloud(const PointCloudPtr& target, const PointCloudPtr& source
 
     if(config.register_method_type == MethodType::PCL_GENERIC) {
         ndt_matching.setInputTarget(target);
-        // std::cout<<"----------------------1\n";
         ndt_matching.setInputSource(source);
-        // std::cout<<"----------------------2\n";
         Eigen::Matrix4f init_guss = matrix.cast<float>();
         ndt_matching.align(*output_cloud, init_guss);
-        // std::cout<<"----------------------3\n";
         init_guss = ndt_matching.getFinalTransformation();
         matrix = init_guss.cast<double>();
-        // std::cout<<"----------------------4\n";
         score =  ndt_matching.getFitnessScore();
         std::cout<<"MethodType::PCL_GENERIC score:"<<score<<std::endl;
         is_converged = ndt_matching.hasConverged();
@@ -280,7 +267,7 @@ bool RegisterPointCloud(const PointCloudPtr& target, const PointCloudPtr& source
     #endif
 
     if(config.register_method_type == MethodType::ICP_ETH){
-        if (!align_pointmatcher.Align<PointT>(target, source,
+        if (!align_pointmatcher_ptr->Align<PointT>(target, source,
                                                   matrix, score)){
             score = std::numeric_limits<double>::max();
         }
@@ -291,6 +278,54 @@ bool RegisterPointCloud(const PointCloudPtr& target, const PointCloudPtr& source
     return is_converged;
 }
 
+PointCloudPtr SegmentedCloud(PointCloudPtr cloud){
+    auto header = cloud->header;
+    lidar_segmentation_ptr->CloudMsgHandler(cloud);
+    auto seg_cloud = lidar_segmentation_ptr->GetSegmentedCloud();
+    // auto seg_cloud = lidar_segmentation_ptr->GetSegmentedCloudPure();
+    seg_cloud->header = header;
+    return seg_cloud;
+}
+
+bool AlignPointCloud(const PointCloudPtr& cloud_in, Eigen::Matrix4d& matrix, double& score){
+    static bool init(false);
+    static uint32_t frame_cnt(1);
+    PointCloudPtr source_ptr(new PointCloud);
+    pcl::copyPointCloud(*cloud_in, *source_ptr);
+    // source_ptr = SegmentedCloud(source_ptr);
+
+    static PointCloudPtr target_ptr(new PointCloud);
+    if(!init){
+      pcl::copyPointCloud(*source_ptr, *target_ptr);
+      init = true;
+      return false;
+    }
+
+    PointCloudPtr output(new PointCloud);
+    bool is_converged(true);
+    if(config.register_method_type == MethodType::PCL_GENERIC) {
+        Eigen::Matrix4f init_guss = matrix.cast<float>();
+        ndt_matching.setInputTarget(target_ptr);
+        ndt_matching.setInputSource(source_ptr);       
+        ndt_matching.align(*output, init_guss);
+        init_guss = ndt_matching.getFinalTransformation();
+        matrix = init_guss.cast<double>();
+        score =  ndt_matching.getFitnessScore();
+        is_converged = ndt_matching.hasConverged();
+        ROS_INFO_STREAM("MethodType::PCL_GENERIC score:"<<score);
+    } else if(config.register_method_type == MethodType::ICP_ETH){
+        if (!align_pointmatcher_ptr->Align<PointT>(target_ptr, source_ptr, matrix, score)){
+            score = std::numeric_limits<double>::max();
+        }
+        ROS_INFO_STREAM("MethodType::ICP_ETH score:"<<score);
+    }
+    ROS_INFO_STREAM("frame:["<<std::fixed<<std::setprecision(6)<<"id:"<<frame_cnt<<"-pts:"<<target_ptr->size()
+                    <<" --> "<<"id:"<<frame_cnt++<<"-pts:"<<source_ptr->size()<<"], score:"<<score);
+    target_ptr->clear();
+    pcl::copyPointCloud(*source_ptr, *target_ptr);
+    return is_converged;
+}
+
 void OuputPointCloud(const PointCloudPtr& cloud){
     for(int i = 0; i < 20; i++){
         ROS_INFO_STREAM("pts:"<<std::fixed<<std::setprecision(6)<<
@@ -298,7 +333,7 @@ void OuputPointCloud(const PointCloudPtr& cloud){
     }
 }
 
-bool FindCorrespondGpsMsg(const double pts_stamp, POSEPtr& gps_pose) {
+bool FindCorrespondGpsMsg(const double pts_stamp, POSEPtr& ins_pose) {
     bool is_find(false);
     gps_mutex.lock();
     while(!gps_msgs.empty()){
@@ -309,8 +344,7 @@ bool FindCorrespondGpsMsg(const double pts_stamp, POSEPtr& gps_pose) {
             auto gps_msg = gps_msgs.front();
             pose->pos = Eigen::Vector3d(gps_msg->pose.position.x, gps_msg->pose.position.y, gps_msg->pose.position.z);
             pose->q = Eigen::Quaterniond(gps_msg->pose.orientation.w, gps_msg->pose.orientation.x, gps_msg->pose.orientation.y, gps_msg->pose.orientation.z);
-            // ceres_optimizer.InsertGPS(gps_pose);
-            gps_pose = pose;
+            ins_pose = pose;
             is_find = true;
             break;
         } else if(stamp_diff < -config.time_synchronize_threshold) {
@@ -325,31 +359,33 @@ bool FindCorrespondGpsMsg(const double pts_stamp, POSEPtr& gps_pose) {
 }
 
 
-void PointsCallback(const sensor_msgs::PointCloud2::ConstPtr &pts_msg){
-    static std::size_t flag_pts(0);
-    ROS_INFO_STREAM("======================Pts Callback Begin================:"<<flag_pts);
-    double cur_stamp = pts_msg->header.stamp.toSec();
+void PointsCallback(const sensor_msgs::PointCloud2::ConstPtr &input){
+    static bool init_pose_flag(false);
     if(!init_pose_flag && gps_msgs.empty()) {
         ROS_INFO_STREAM("waiting to initizlizing by gps...");
         return;
     }
-    //init pose and last_scan
-    PointCloudPtr point_msg(new PointCloud);
-    PointCloudPtr transformed_scan_ptr(new PointCloud);
-    // ROS_INFO_STREAM("==================----frame_id: "<<pts_msg->header.frame_id);
-    pcl::fromROSMsg(*pts_msg, *point_msg);
 
+    static std::size_t frame_cnt(1);
+    double timestamp = input->header.stamp.toSec();
+
+    PointCloudPtr point_msg(new PointCloud);
+    pcl::fromROSMsg(*input, *point_msg);
     point_msg = FilterCloudFrame(point_msg, config.voxel_filter_size);
     if(point_msg->size() == 0) return;
 
-    static Eigen::Affine3d cur_odom_pose=Eigen::Affine3d::Identity();
-    static PointCloudPtr last_scan_ptr(new PointCloud);
-    static Eigen::Matrix4d last_pose = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d tf = Eigen::Matrix4d::Identity();
+    double fitness_score = std::numeric_limits<double>::max();
+
+    static Eigen::Matrix4d lio_pose = Eigen::Matrix4d::Identity();
     
     if(!init_pose_flag)
     { 
+        if(!AlignPointCloud(point_msg, tf, fitness_score)){
+            ROS_INFO_STREAM("AlignPointCloud init success.");
+        }
         POSEPtr init_odom;
-        if(!FindCorrespondGpsMsg(cur_stamp, init_odom)){
+        if(!FindCorrespondGpsMsg(timestamp, init_odom)){
             ROS_INFO_STREAM("PointCloud Callback init failed!!!");
             return;
         }
@@ -357,83 +393,64 @@ void PointsCallback(const sensor_msgs::PointCloud2::ConstPtr &pts_msg){
         CHECK_NOTNULL(init_odom);
         ceres_optimizer.InsertOdom(init_odom);
         init_pose = POSE2Affine(init_odom);
-
-        // pcl::transformPointCloud(*point_msg, *transformed_scan_ptr, init_pose.matrix());
-        // last_scan_ptr = transformed_scan_ptr;
-        last_scan_ptr = point_msg;
-        last_pose = init_pose.matrix();
+        lio_pose = init_pose.matrix();
 
         init_pose_flag = true;
         return;    
     }
-    PointCloudPtr map_ptr(new PointCloud(map));
     
     //find real-time gps-pose
     POSEPtr ins_pose;
-    if(!FindCorrespondGpsMsg(cur_stamp, ins_pose)){
-        ROS_INFO_STREAM("failed to search ins_pose at:"<<std::fixed<<std::setprecision(6)<<cur_stamp);
+    if(!FindCorrespondGpsMsg(timestamp, ins_pose)){
+        ROS_INFO_STREAM("failed to search ins_pose at:"<<std::fixed<<std::setprecision(6)<<timestamp);
         return;
     }
     CHECK_NOTNULL(ins_pose);
 
-    Eigen::Matrix4d trans = last_pose.inverse() * POSE2Affine(ins_pose).matrix();
+    Eigen::Matrix4d trans = lio_pose.inverse() * POSE2Affine(ins_pose).matrix();
     auto dist = trans.block<3,1>(0,3).norm();
-    if(dist < 0.25) {
+    if(dist < config.frame_dist) {
         ROS_INFO_STREAM("the distance to last frame is :"<<dist<<" too small!!!");
         return;
     }
 
-    // Eigen::Matrix4d tf = trans;//Eigen::Matrix4d::Identity();
-    Eigen::Matrix4d tf = Eigen::Matrix4d::Identity();
-    double fitness_score = std::numeric_limits<double>::max();
-    if(!RegisterPointCloud(last_scan_ptr, point_msg, tf, fitness_score)) {
-         ROS_WARN_STREAM("regis between:("<<flag_pts-1<<", "<<flag_pts<<") is failed!!!");
-    }   
+    if(!AlignPointCloud(point_msg, tf, fitness_score)){
+        ROS_WARN_STREAM("regis between:("<<frame_cnt-1<<", "<<frame_cnt<<") is failed!!!");
+    }
 
     //insert odom-trans to optimizer
-    POSEPtr odom_pose(new POSE);
-    odom_pose->time = cur_stamp;
-    odom_pose->pos = Eigen::Vector3d(tf(0,3), tf(1,3), tf(2,3));
-    odom_pose->q   = Eigen::Quaterniond(tf.block<3,3>(0,0));
-    odom_pose->score = fitness_score;
-    ceres_optimizer.InsertOdom(odom_pose);
+    POSEPtr lio_factor(new POSE);
+    lio_factor->time = timestamp;
+    lio_factor->pos = Eigen::Vector3d(tf(0,3), tf(1,3), tf(2,3));
+    lio_factor->q   = Eigen::Quaterniond(tf.block<3,3>(0,0));
+    lio_factor->score = fitness_score;
+    ceres_optimizer.InsertOdom(lio_factor);
     
-    auto cur_pose = last_pose*tf;
-    // pcl::transformPointCloud(*point_msg, *transformed_scan_ptr, cur_pose);
-    last_scan_ptr = point_msg;
-    
-    
-    // map += *transformed_scan_ptr;
-    ROS_INFO_STREAM("last_pts:"<<last_scan_ptr->size()<<", cur_pts:"<<point_msg->size()<<", transformed:"<<transformed_scan_ptr->size(););
-
-    ROS_INFO_STREAM("regis-last pose:"<<std::fixed<<std::setprecision(6)<<last_pose(0,3)<<","<<last_pose(1,3)<<","<<last_pose(2,3)<<
-                    " regis-tf:"<<std::fixed<<std::setprecision(6)<<tf(0,3)<<","<<tf(1,3)<<","<<tf(2,3)<<
-                                    ", between:("<<flag_pts-1<<"->"<<flag_pts<<") score:"<<fitness_score<<
-                    " regis-current pose:"<<std::fixed<<std::setprecision(6)<<cur_pose(0,3)<<","<<cur_pose(1,3)<<","<<cur_pose(2,3));
-    //add keyframe
-    AddKeyFrame(tf, cur_pose, point_msg);
-    last_pose = cur_pose;
-    
+    lio_pose *= tf;
+    //add keyframe TODO
+    point_msg = SegmentedCloud(point_msg); //test the lidar-seg
+    AddKeyFrame(tf, lio_pose, point_msg);    
     
     //insert gps data to optimizer
-    if(flag_pts++ % 5 == 0) {
+    if(frame_cnt++ % config.ceres_config.num_every_scans == 0) {
         ROS_INFO_STREAM("Anchor is to correct the pose....");
         ceres_optimizer.InsertGPS(ins_pose);
     }    
 
-    //publish lidar_odometry's pose
-    cur_odom_pose = Eigen::Affine3d(last_pose);//last_pose = tf_trans;
-    POSEPtr odom_result(new POSE);
-    odom_result->time = cur_stamp;
-    odom_result->pos = Eigen::Vector3d(cur_odom_pose.translation().x(), cur_odom_pose.translation().y(), cur_odom_pose.translation().z());
-    odom_result->q = Eigen::Quaterniond(cur_odom_pose.linear());
-    ceres_optimizer.AddPoseToNavPath(odom_path, odom_result);
-    odom_pose_pub.publish(odom_path);
+    //publish lidar_odometry's path
+    static nav_msgs::Path odom_path;
+    POSEPtr odom_pose(new POSE);
+    odom_pose->time = timestamp;
+    odom_pose->pos = Eigen::Vector3d(lio_pose(0,3), lio_pose(1,3), lio_pose(2,3));
+    odom_pose->q = Eigen::Quaterniond(lio_pose.block<3, 3>(0, 0));
+    ceres_optimizer.AddPoseToNavPath(odom_path, odom_pose);
+    lio_pos_pub.publish(odom_path);
     ROS_INFO_STREAM("Num of Lidar-odom  pose:"<<odom_path.poses.size());
-    // ROS_INFO_STREAM("path Odom pose:"<<std::fixed<<std::setprecision(6)<<odom_result->pos[0]<<","<<odom_result->pos[1]<<","<<odom_result->pos[2]);
 
+    //publish optimized path
+    static nav_msgs::Path *optimized_path = &ceres_optimizer.optimized_path;
     if(!optimized_path->poses.empty()){
-        pose_pub.publish(*optimized_path);
+        optimized_pos_pub.publish(*optimized_path);
         ROS_INFO_STREAM("Num of Optimized's pose:"<<optimized_path->poses.size());
     }
 }
@@ -452,15 +469,15 @@ void MappingTimerCallback(const ros::WallTimerEvent& event){
 }
 static void MappingCallback(const geometry_msgs::PoseStamped::ConstPtr &gps, 
                             const sensor_msgs::PointCloud2::ConstPtr &pts){
-    static int flag(0);
+    static int msg_cnt(0);
     double stamp_gps = gps->header.stamp.toSec();
     double stamp_pts = pts->header.stamp.toSec();
-    ROS_INFO_STREAM("timestamp between gps and pts:["<<std::fixed<<std::setprecision(6)<<flag++<<"]"<<
+    ROS_INFO_STREAM("timestamp between gps and pts:["<<std::fixed<<std::setprecision(6)<<msg_cnt++<<"]"<<
                     stamp_gps - stamp_pts);
 
     Eigen::Affine3d pose = Eigen::Translation3d(gps->pose.position.x, gps->pose.position.y, gps->pose.position.z)*
                         Eigen::Quaterniond(gps->pose.orientation.w, gps->pose.orientation.x, gps->pose.orientation.y, gps->pose.orientation.z);
-    if(flag == 1) init_pose = pose;
+    if(msg_cnt == 1) init_pose = pose;
 
     PointCloudPtr point_msg(new PointCloud);
     pcl::fromROSMsg(*pts, *point_msg);
@@ -469,14 +486,14 @@ static void MappingCallback(const geometry_msgs::PoseStamped::ConstPtr &gps,
 
     PointCloudPtr transformed_scan_ptr(new PointCloud);    
     pcl::transformPointCloud(*point_msg, *transformed_scan_ptr, pose.matrix());  
-    map += *transformed_scan_ptr;
+    map_autoware += *transformed_scan_ptr;
     
-    map.width = map.size();
-    ROS_INFO_STREAM("current pts and map's size:"<<point_msg->size()<<", "<<map.size());
+    map_autoware.width = map_autoware.size();
+    ROS_INFO_STREAM("current pts and map's size:"<<point_msg->size()<<", "<<map_autoware.size());
 }
 
 static void output_callback(const autoware_config_msgs::ConfigNDTMappingOutput::ConstPtr& input){
-    if(map.size() == 0) {
+    if(map_autoware.size() == 0) {
         ROS_INFO_STREAM("map is empty()!!!");
         return;
     }
@@ -487,7 +504,7 @@ static void output_callback(const autoware_config_msgs::ConfigNDTMappingOutput::
   std::cout << "filter_res: " << filter_res << std::endl;
   std::cout << "filename: " << filename << std::endl;
 
-  pcl::PointCloud<PointT>::Ptr map_ptr(new pcl::PointCloud<PointT>(map));
+  pcl::PointCloud<PointT>::Ptr map_ptr(new pcl::PointCloud<PointT>(map_autoware));
   pcl::PointCloud<PointT>::Ptr map_filtered(new pcl::PointCloud<PointT>());
   map_ptr->header.frame_id = "map";
   map_filtered->header.frame_id = "map";
@@ -515,43 +532,48 @@ int main(int argc, char** argv) {
 
    ros::NodeHandle nh;
    ros::NodeHandle private_nh("~");
-   {//params timestamp thershold
-   private_nh.getParam("gps_lidar_time_threshold",config.time_synchronize_threshold);
-   //params filter
-   private_nh.getParam("lidar_yaw_calib_degree", config.lidar_yaw_calib_degree);
-   private_nh.getParam("voxel_filter_size", config.voxel_filter_size);
-   private_nh.getParam("distance_near_thresh", config.distance_near_thresh);
-   private_nh.getParam("distance_far_thresh", config.distance_far_thresh);
-   //params ndt
-   private_nh.getParam("icp_config_file", config.icp_config_file);
-   int ndt_method = 0;
-   private_nh.getParam("method_type", ndt_method);
-   config.register_method_type  = static_cast<MethodType>(ndt_method);
-   private_nh.getParam("ndt_trans_epsilon", config.ndt_trans_epsilon);
-   private_nh.getParam("ndt_step_size",     config.ndt_step_size);
-   private_nh.getParam("ndt_resolution",    config.ndt_resolution);
-   private_nh.getParam("ndt_maxiterations", config.ndt_maxiterations);
-   //params ceres
-   private_nh.getParam("optimize_iter_num",   config.ceres_config.iters_num);
-   private_nh.getParam("optimize_var_anchor", config.ceres_config.var_anchor);
-   private_nh.getParam("optimize_var_odom_t", config.ceres_config.var_odom_t);
-   private_nh.getParam("optimize_var_odom_q", config.ceres_config.var_odom_q);
-   //mapping params  
-   private_nh.getParam("map_cloud_update_interval", config.map_cloud_update_interval);
-   private_nh.getParam("keyframe_delta_trans", config.keyframe_delta_trans);
-   //log of config
-   ROS_INFO_STREAM("***********config params***********");
-   ROS_INFO_STREAM("gps_lidar_time_threshold:"<<config.time_synchronize_threshold);
-   ROS_INFO_STREAM("voxel_filter_size  :"<<     config.voxel_filter_size);
-   ROS_INFO_STREAM("ndt_trans_epsilon  :"<< config.ndt_trans_epsilon);
-   ROS_INFO_STREAM("ndt_step_size      :"<< config.ndt_step_size);
-   ROS_INFO_STREAM("ndt_resolution     :"<< config.ndt_resolution);
-   ROS_INFO_STREAM("ndt_maxiterations  :"<< config.ndt_maxiterations);
-   ROS_INFO_STREAM("optimize_iter_num  :"<< config.ceres_config.iters_num);
-   ROS_INFO_STREAM("optimize_var_anchor:"<< config.ceres_config.var_anchor);
-   ROS_INFO_STREAM("optimize_var_odom_t:"<< config.ceres_config.var_odom_t);
-   ROS_INFO_STREAM("optimize_var_odom_q:"<< config.ceres_config.var_odom_q);}
-   
+   {
+       //params timestamp thershold
+       private_nh.getParam("gps_lidar_time_threshold",config.time_synchronize_threshold);
+       //params filter
+       private_nh.getParam("lidar_yaw_calib_degree", config.lidar_yaw_calib_degree);
+       private_nh.getParam("voxel_filter_size", config.voxel_filter_size);
+       private_nh.getParam("distance_near_thresh", config.distance_near_thresh);
+       private_nh.getParam("distance_far_thresh", config.distance_far_thresh);
+       //params registration
+       private_nh.getParam("segment_config_file", config.seg_config_file);
+       private_nh.getParam("icp_config_file", config.icp_config_file);
+       private_nh.getParam("frame_dist", config.frame_dist);
+       int ndt_method = 0;
+       private_nh.getParam("method_type", ndt_method);
+       config.register_method_type  = static_cast<MethodType>(ndt_method);
+       private_nh.getParam("ndt_trans_epsilon", config.ndt_trans_epsilon);
+       private_nh.getParam("ndt_step_size",     config.ndt_step_size);
+       private_nh.getParam("ndt_resolution",    config.ndt_resolution);
+       private_nh.getParam("ndt_maxiterations", config.ndt_maxiterations);
+       //params ceres
+       private_nh.getParam("optimize_num_every_scans", config.ceres_config.num_every_scans);
+       private_nh.getParam("optimize_iter_num",   config.ceres_config.iters_num);
+       private_nh.getParam("optimize_var_anchor", config.ceres_config.var_anchor);
+       private_nh.getParam("optimize_var_odom_t", config.ceres_config.var_odom_t);
+       private_nh.getParam("optimize_var_odom_q", config.ceres_config.var_odom_q);
+       //mapping params  
+       private_nh.getParam("map_cloud_update_interval", config.map_cloud_update_interval);
+       private_nh.getParam("keyframe_delta_trans", config.keyframe_delta_trans);
+       //log of config
+       ROS_INFO_STREAM("***********config params***********");
+       ROS_INFO_STREAM("gps_lidar_time_threshold:"<<config.time_synchronize_threshold);
+       ROS_INFO_STREAM("voxel_filter_size  :"<<     config.voxel_filter_size);
+       ROS_INFO_STREAM("ndt_trans_epsilon  :"<< config.ndt_trans_epsilon);
+       ROS_INFO_STREAM("ndt_step_size      :"<< config.ndt_step_size);
+       ROS_INFO_STREAM("ndt_resolution     :"<< config.ndt_resolution);
+       ROS_INFO_STREAM("ndt_maxiterations  :"<< config.ndt_maxiterations);
+       ROS_INFO_STREAM("optimize_iter_num  :"<< config.ceres_config.iters_num);
+       ROS_INFO_STREAM("optimize_var_anchor:"<< config.ceres_config.var_anchor);
+       ROS_INFO_STREAM("optimize_var_odom_t:"<< config.ceres_config.var_odom_t);
+       ROS_INFO_STREAM("optimize_var_odom_q:"<< config.ceres_config.var_odom_q);
+    }
+       
 
    if(config.register_method_type == MethodType::PCL_GENERIC) {
        ndt_matching.setTransformationEpsilon(config.ndt_trans_epsilon);
@@ -568,28 +590,18 @@ int main(int argc, char** argv) {
     }
     #endif
    
+   lidar_segmentation_ptr.reset(new ceres_mapping::lidar_odom::LidarSegmentation(config.seg_config_file));
+   align_pointmatcher_ptr.reset(new AlignPointMatcher(config.icp_config_file));
    ceres_optimizer.SetConfig(config.ceres_config);
-   optimized_path = &ceres_optimizer.optimized_path;
    
    //sub and pub
-   gps_pose_pub = nh.advertise<nav_msgs::Path>("/mapping/path/gps", 100);
-   odom_pose_pub     = nh.advertise<nav_msgs::Path>("/mapping/path/odom",100);
-   pose_pub     = nh.advertise<nav_msgs::Path>("/mapping/path/optimized",100);
+   ins_pos_pub = nh.advertise<nav_msgs::Path>("/mapping/path/gps", 100);
+   lio_pos_pub     = nh.advertise<nav_msgs::Path>("/mapping/path/odom",100);
+   optimized_pos_pub     = nh.advertise<nav_msgs::Path>("/mapping/path/optimized",100);
    pub_filtered = nh.advertise<sensor_msgs::PointCloud2>("/mapping/filtered_frame", 10);
 
    ros::Subscriber points_sub = nh.subscribe("/points_raw", 10000, PointsCallback);
-   ros::Subscriber gnss_sub   = nh.subscribe("/gnss_pose",  16000,  GNSSCallback);
-
-   //mapping by gps's pose
-   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> sub_pts;
-   std::unique_ptr<message_filters::Subscriber<geometry_msgs::PoseStamped>> sub_pose;
-   typedef message_filters::sync_policies::ApproximateTime<geometry_msgs::PoseStamped, sensor_msgs::PointCloud2> sync_policy;
-   std::unique_ptr<message_filters::Synchronizer<sync_policy>> sync;
-   
-   sub_pose.reset(new message_filters::Subscriber<geometry_msgs::PoseStamped>(nh, "/gnss_pose", 100));
-   sub_pts.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(nh, "/points_raw", 10));
-   sync.reset(new message_filters::Synchronizer<sync_policy>(sync_policy(10), *sub_pose, *sub_pts));
-//    sync->registerCallback(boost::bind(MappingCallback, _1, _2));
+   ros::Subscriber gnss_sub   = nh.subscribe("/gnss_pose",  16000,  InsCallback);
 
    //mapping
    ros::WallTimer map_publish_timer = nh.createWallTimer(ros::WallDuration(config.map_cloud_update_interval), MappingTimerCallback);

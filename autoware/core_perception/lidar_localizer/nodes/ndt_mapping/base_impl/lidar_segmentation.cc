@@ -23,6 +23,7 @@ LidarSegmentation::LidarSegmentation(const std::string& lidar_config_file) {
   
     full_cloud_->points.resize(cloud_size);
     full_cloud_with_range_->points.resize(cloud_size);
+    LOG(INFO)<<"construct success.";
 }
 
 

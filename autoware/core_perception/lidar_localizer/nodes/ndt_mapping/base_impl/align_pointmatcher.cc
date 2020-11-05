@@ -9,7 +9,7 @@ AlignPointMatcher::AlignPointMatcher(const std::string& yaml_file) {
   } else {
     icp.loadFromYaml(ifs);
   }
-
+  LOG(INFO)<<"construct success.";
   // CHECK(Init(yaml_file));
 }
 

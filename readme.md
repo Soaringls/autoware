@@ -1,6 +1,6 @@
 ```sh
 mkdir catkin_autoware
-git clone usr ./src
+git clone usr ./src  #src根目录不可有cmake
 
 ```
 

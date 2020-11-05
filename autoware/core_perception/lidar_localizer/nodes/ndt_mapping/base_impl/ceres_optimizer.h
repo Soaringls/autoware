@@ -146,6 +146,7 @@ namespace mapping{
 };
 
 struct CeresConfig{
+    int num_every_scans = 1;
     int iters_num = 10;
     double var_anchor = 0.05;
     double var_odom_t = 0.1;

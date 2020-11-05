@@ -43,13 +43,16 @@
     <param name="method_type" value="4" /> 
     <!-- <param name="method_type" value="0" /> -->
     <param name="segment_config_file" value="/autoware/workspace/data/params/lidar_odometry_config.yaml" />
-    <param name="icp_config_file" value="/autoware/workspace/data/params/libpointmatcher_config.p2plane.yaml" />
+    <!-- <param name="icp_config_file" value="/autoware/workspace/data/params/libpointmatcher_config.p2plane.yaml" /> -->
     <!-- <param name="icp_config_file" value="/autoware/workspace/data/params/libpointmatcher_config.p2p.yaml" /> -->
+    <param name="frame_dist" value="0.08" />
+
     <param name="ndt_trans_epsilon" value="$(arg ndt_trans_epsilon)" />
     <param name="ndt_resolution" value="$(arg ndt_resolution)" />
     <param name="ndt_maxiterations" value="$(arg ndt_maxiterations)" />
     <param name="ndt_step_size" value="$(arg ndt_step_size)" />
     <!-- back_end optimizer params -->
+    <param name="optimize_num_every_scans" value="1" />
     <param name="optimize_iter_num" value="$(arg optimize_iter_num)" />
     <param name="optimize_var_anchor" value="$(arg optimize_var_anchor)" />
     <param name="optimize_var_odom_t" value="$(arg optimize_var_odom_t)" />

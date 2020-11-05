@@ -72,6 +72,7 @@ find_package(Ceres REQUIRED)
 find_package(libpointmatcher REQUIRED)
 find_package(Boost REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(Glog)
 # include_directories(${YAMLCPP_INCLUDE_DIR})
 # link_directories(${YAMLCPP_LIBRARY_DIRS})
 include_directories(
@@ -79,6 +80,7 @@ include_directories(
   ${YAMLCPP_INCLUDE_DIR}
   ${libpointmatcher_INCLUDE_DIRS}
   include
+  ${GLOG_INCLUDE_DIR}
   ${Boost_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
@@ -154,7 +156,7 @@ add_executable(ceres_mapping nodes/ndt_mapping/mapping.cpp
               
 target_link_libraries(ceres_mapping 
      ${catkin_LIBRARIES} ${CERES_LIBRARIES} ${libpointmatcher_LIBRARIES}
-     yaml-cpp
+     yaml-cpp glog
      ${Boost_LIBRARIES}
      "/usr/local/lib/libpointmatcher.so.1.3.1"
      "/usr/local/lib/libpointmatcher.so.1"
