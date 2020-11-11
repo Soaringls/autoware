@@ -9,8 +9,8 @@ AlignPointMatcher::AlignPointMatcher(const std::string& yaml_file) {
     icp_sequence_.setDefault();
   } else {
     icp.loadFromYaml(ifs);
-    icp_sequence_.setDefault();
     // icp_sequence_.loadFromYaml(ifs);
+    icp_sequence_.setDefault();
   }
   LOG(INFO)<<"construct success.";
   // CHECK(Init(yaml_file));
@@ -116,12 +116,23 @@ template bool AlignPointMatcher::Align<pcl::PointXYZI>(
     Eigen::Matrix4d& trans_matrix, double& score);
 
 //set map
+bool AlignPointMatcher::setmap(const std::string& map_file){
+  std::string map_file11 = "/autoware/workspace/data/map/map_hengtong/hengtong_1106_local.pcd";
+  DP map(DP::load(map_file11));
+  LOG(INFO)<<"set map to aligner, size2:";
+  icp_sequence_.setMap(map);
+  LOG(INFO)<<"set map to aligner, size3:";
+  return true;
+}
 template <typename PointT>
 bool AlignPointMatcher::SetMap(const typename pcl::PointCloud<PointT>::ConstPtr reference_cloud){
-  //todo
+  LOG(INFO)<<"set map to aligner, size--:"<<reference_cloud->size();
   DP map_pts;
   ConverToDataPoints<PointT>(reference_cloud, map_pts);
-  return icp_sequence_.setMap(map_pts);
+  LOG(INFO)<<"set map to aligner, size--2:"<<reference_cloud->size();
+  icp_sequence_.setMap(map_pts);
+  LOG(INFO)<<"set map to aligner, size3:"<<reference_cloud->size();
+  return true;
 }
 template bool AlignPointMatcher::SetMap<pcl::PointXYZ>(
       const typename pcl::PointCloud<pcl::PointXYZ>::ConstPtr reference_coud);

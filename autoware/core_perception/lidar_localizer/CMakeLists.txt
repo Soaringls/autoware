@@ -35,8 +35,10 @@ else()
   set(EIGEN3_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIR})
 endif()
 
+set(lidar_alignment_DIR "/autoware/workspace/install/lidar_alignment/share/lidar_alignment/cmake")
 find_package(catkin REQUIRED COMPONENTS
   ${PCL_OPENMP_PACKAGES}
+  lidar_alignment
   autoware_config_msgs
   autoware_health_checker
   autoware_msgs
@@ -87,9 +89,32 @@ include_directories(
 )
 
 SET(CMAKE_CXX_FLAGS "-O2 -g -Wall ${CMAKE_CXX_FLAGS}")
+set(THIRD_DEPS 
+  ${catkin_LIBRARIES}
+  ${CERES_LIBRARIES} 
+  yaml-cpp glog
+  # lidar_alignment 
+  /autoware/workspace/install/lidar_alignment/lib/liblidar_alignment.so
+  
+  ${Boost_LIBRARIES}
+  ${libpointmatcher_LIBRARIES}
+  "/usr/local/lib/libpointmatcher.so.1.3.1"
+  "/usr/local/lib/libpointmatcher.so.1"
+  "/usr/local/lib/libpointmatcher.so"
+)
+
+add_executable(icp_matching_neolix nodes/icp_matching_neolix/icp_matching.cpp)
+target_link_libraries(icp_matching_neolix ${THIRD_DEPS})
+
+add_executable(test_ethicp nodes/icp_matching_neolix/main.cc)
+target_link_libraries(test_ethicp ${THIRD_DEPS})
+
 
 add_executable(ndt_matching nodes/ndt_matching/ndt_matching.cpp)
-target_link_libraries(ndt_matching ${catkin_LIBRARIES})
+target_link_libraries(ndt_matching 
+                      glog 
+                      ${Boost_LIBRARIES}
+                      ${catkin_LIBRARIES})
 add_dependencies(ndt_matching ${catkin_EXPORTED_TARGETS})
 
 add_executable(ndt_mapping nodes/ndt_mapping/ndt_mapping.cpp)
@@ -149,25 +174,27 @@ add_dependencies(icp_matching ${catkin_EXPORTED_TARGETS})
 
 add_executable(ceres_mapping nodes/ndt_mapping/mapping.cpp
                              nodes/ndt_mapping/base_impl/ceres_optimizer.cpp
-                             nodes/ndt_mapping/base_impl/align_pointmatcher.cc            
-                             nodes/ndt_mapping/base_impl/config_loader.cc
-                             nodes/ndt_mapping/base_impl/lidar_segmentation.cc
-              )
-              
-target_link_libraries(ceres_mapping 
-     ${catkin_LIBRARIES} ${CERES_LIBRARIES} ${libpointmatcher_LIBRARIES}
-     yaml-cpp glog
-     ${Boost_LIBRARIES}
-     "/usr/local/lib/libpointmatcher.so.1.3.1"
-     "/usr/local/lib/libpointmatcher.so.1"
-     "/usr/local/lib/libpointmatcher.so"
+                            #  nodes/ndt_mapping/base_impl/align_pointmatcher.cc            
+                            #  nodes/ndt_mapping/base_impl/config_loader.cc
+                            #  nodes/ndt_mapping/base_impl/lidar_segmentation.cc
 )
-add_dependencies(ceres_mapping ${catkin_EXPORTED_TARGETS})
+target_link_libraries(ceres_mapping ${THIRD_DEPS})
+# target_link_libraries(ceres_mapping 
+#      ${catkin_LIBRARIES} ${CERES_LIBRARIES} 
+#      yaml-cpp glog
+#      ${Boost_LIBRARIES}
+#      ${libpointmatcher_LIBRARIES}
+#      "/usr/local/lib/libpointmatcher.so.1.3.1"
+#      "/usr/local/lib/libpointmatcher.so.1"
+#      "/usr/local/lib/libpointmatcher.so"
+# )
+# add_dependencies(ceres_mapping ${catkin_EXPORTED_TARGETS})
 
 install(
   TARGETS
     approximate_ndt_mapping
     icp_matching
+    icp_matching_neolix
     mapping
     ceres_mapping
     ndt_mapping

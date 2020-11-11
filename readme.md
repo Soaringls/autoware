@@ -18,3 +18,10 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Debug Release
 colcon build --packages-select ekf_localizer
 
 rviz -d ./data/ces_mapping.rviz 
+
+
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/autoware/workspace/install/lidar_alignment/lib/
+
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Debug --packages-select lidar_localizer
+/autoware/workspace/data/map/2230-test.pcd
