@@ -31,31 +31,31 @@
     <!-- time_config -->
     <param name="gps_lidar_time_threshold" value="$(arg gps_lidar_time_threshold)" />
     <!-- filter_params -->
-    <param name="lidar_yaw_calib_degree" value="90" />
-    <param name="distance_near_thresh" value="1.6" />
-    <param name="distance_far_thresh" value="50" />
+    <param name="lidar_yaw_calib_degree" value="0" />
+    <param name="distance_near_thresh" value="2" />
+    <param name="distance_far_thresh" value="40" />
     <param name="voxel_filter_size" value="$(arg voxel_filter_size)" />
     <!-- registration params -->
-    <!-- <param name="method_type" value="4" />  -->
-    <param name="method_type" value="0" />
+    <param name="method_type" value="4" /> 
+    <!-- <param name="method_type" value="0" /> -->
     <param name="segment_config_file" value="/autoware/workspace/data/params/lidar_odometry_config.yaml" />
-    <!-- <param name="icp_config_file" value="/autoware/workspace/data/params/libpointmatcher_config.p2plane.yaml" /> -->
-    <param name="icp_config_file" value="/autoware/workspace/data/params/libpointmatcher_config.p2p.yaml" />
-    <param name="frame_dist" value="0.01" />
+    <param name="icp_config_file" value="/autoware/workspace/data/params/libpointmatcher_config.p2plane.yaml" />
+    <!-- <param name="icp_config_file" value="/autoware/workspace/data/params/libpointmatcher_config.p2p.yaml" /> -->
+    <param name="frame_dist" value="0.1" />
 
     <param name="ndt_trans_epsilon" value="$(arg ndt_trans_epsilon)" />
     <param name="ndt_resolution" value="$(arg ndt_resolution)" />
     <param name="ndt_maxiterations" value="$(arg ndt_maxiterations)" />
     <param name="ndt_step_size" value="$(arg ndt_step_size)" />
     <!-- back_end optimizer params -->
-    <param name="optimize_num_every_scans" value="1" />
+    <param name="optimize_num_every_scans" value="30" />
     <param name="optimize_iter_num" value="$(arg optimize_iter_num)" />
     <param name="optimize_var_anchor" value="$(arg optimize_var_anchor)" />
     <param name="optimize_var_odom_t" value="$(arg optimize_var_odom_t)" />
     <param name="optimize_var_odom_q" value="$(arg optimize_var_odom_q)" />
     <!-- mapping -->
     <param name="map_cloud_update_interval" value="5" />
-    <param name="keyframe_delta_trans" value="0.2" />
+    <param name="keyframe_delta_trans" value="0.3" />
   </node>
 
 </launch>

@@ -118,8 +118,8 @@ target_link_libraries(ndt_matching
 add_dependencies(ndt_matching ${catkin_EXPORTED_TARGETS})
 
 add_executable(ndt_mapping nodes/ndt_mapping/ndt_mapping.cpp)
-target_link_libraries(ndt_mapping ${catkin_LIBRARIES})
-add_dependencies(ndt_mapping ${catkin_EXPORTED_TARGETS})
+target_link_libraries(ndt_mapping ${catkin_LIBRARIES} glog)
+add_dependencies(ndt_mapping ${catkin_EXPORTED_TARGETS} glog)
 
 if(USE_CUDA)
   target_include_directories(ndt_matching PRIVATE ${CUDA_INCLUDE_DIRS})

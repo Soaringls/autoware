@@ -26,13 +26,12 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-
+#include <glog/logging.h>
 #include <nav_msgs/Odometry.h>
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <std_msgs/Bool.h>
-#include <nav_msgs/Path.h>
 #include <std_msgs/Float32.h>
 #include <velodyne_pointcloud/point_types.h>
 #include <velodyne_pointcloud/rawdata.h>
@@ -44,18 +43,16 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <pcl/octree/octree_search.h>
 
 #include <ndt_cpu/NormalDistributionsTransform.h>
 #include <pcl/registration/ndt.h>
-// #define CUDA_FOUND
 #ifdef CUDA_FOUND
 #include <ndt_gpu/NormalDistributionsTransform.h>
 #endif
-// #ifdef USE_PCL_OPENMP
+#ifdef USE_PCL_OPENMP
 #include <pcl_omp_registration/ndt.h>
-// #endif
-#include <fstream>
+#endif
+
 #include <autoware_config_msgs/ConfigNDTMapping.h>
 #include <autoware_config_msgs/ConfigNDTMappingOutput.h>
 
@@ -81,10 +78,6 @@ enum class MethodType
 static MethodType _method_type = MethodType::PCL_GENERIC;
 
 // global variables
-static Eigen::Affine3d init_pose = Eigen::Affine3d::Identity();
-static std::ofstream ofs_ref, ofs_odom_pose;
-static std::string   output_filename_ref, output_filename_odom;
-
 static pose previous_pose, guess_pose, guess_pose_imu, guess_pose_odom, guess_pose_imu_odom, current_pose,
     current_pose_imu, current_pose_odom, current_pose_imu_odom, ndt_pose, added_pose, localizer_pose;
 
@@ -134,9 +127,6 @@ static ros::Duration d_callback, d1, d2, d3, d4, d5;
 static ros::Publisher ndt_map_pub;
 static ros::Publisher current_pose_pub;
 static ros::Publisher guess_pose_linaer_pub;
-static ros::Publisher gps_pose_pub ;
-static ros::Publisher odom_pose_pub;
-static ros::Publisher pub_map;
 static geometry_msgs::PoseStamped current_pose_msg, guess_pose_msg;
 
 static ros::Publisher ndt_stat_pub;
@@ -172,14 +162,6 @@ static nav_msgs::Odometry odom;
 static std::ofstream ofs;
 static std::string filename;
 
-Eigen::Matrix4f TransformPoseToEigenMatrix4f(const pose &ref){
-  Eigen::AngleAxisf x_rotation_vec(ref.roll, Eigen::Vector3f::UnitX());
-  Eigen::AngleAxisf y_rotation_vec(ref.pitch, Eigen::Vector3f::UnitY());
-  Eigen::AngleAxisf z_rotation_vec(ref.yaw, Eigen::Vector3f::UnitZ());
-
-  Eigen::Translation3f t(ref.x, ref.y, ref.z);
-  return (t * z_rotation_vec * y_rotation_vec * x_rotation_vec).matrix();
-}
 static void param_callback(const autoware_config_msgs::ConfigNDTMapping::ConstPtr& input)
 {
   ndt_res = input->resolution;
@@ -204,10 +186,8 @@ static void param_callback(const autoware_config_msgs::ConfigNDTMapping::ConstPt
 
 static void output_callback(const autoware_config_msgs::ConfigNDTMappingOutput::ConstPtr& input)
 {
-  if(map.empty()){
-    std::cout<<"map  is  empty!!!!!!"<<map.size()<<std::endl;
-    return;
-  }
+  if(map.empty()) LOG(WARNING)<<"map is empty!";
+
   double filter_res = input->filter_res;
   std::string filename = input->filename;
   std::cout << "output_callback" << std::endl;
@@ -218,11 +198,10 @@ static void output_callback(const autoware_config_msgs::ConfigNDTMappingOutput::
   pcl::PointCloud<pcl::PointXYZI>::Ptr map_filtered(new pcl::PointCloud<pcl::PointXYZI>());
   map_ptr->header.frame_id = "map";
   map_filtered->header.frame_id = "map";
-  // sensor_msgs::PointCloud2::Ptr map_msg_ptr(new sensor_msgs::PointCloud2);
-  
-  // pcl::transformPointCloud(*map_ptr, *map_ptr, init_pose);
+  sensor_msgs::PointCloud2::Ptr map_msg_ptr(new sensor_msgs::PointCloud2);
   for(int i = 0; i < 200; ++i){
-    std::cout<<"map_pt:"<<map_ptr->points[i].x<<" "<<map_ptr->points[i].y<<" "<<map_ptr->points[i].z<<std::endl;
+    LOG(INFO)<<std::fixed<<std::setprecision(6)
+           <<"map-point:"<<map_ptr->points[i].x<<", "<<map_ptr->points[i].y<<", "<<map_ptr->points[i].z;
   }
   // Apply voxelgrid filter
   if (filter_res == 0.0)
@@ -247,14 +226,15 @@ static void output_callback(const autoware_config_msgs::ConfigNDTMappingOutput::
   if (filter_res == 0.0)
   {
     pcl::io::savePCDFileASCII(filename, *map_ptr);
-    std::cout << "Saved " << map_ptr->points.size() << " data origin points to " << filename << "." << std::endl;
+    LOG(INFO)<< "Saved " << map_ptr->points.size() << " data origin points to " << filename;
   }
   else
   {
     pcl::io::savePCDFileASCII(filename, *map_filtered);
-    std::cout << "Saved " << map_filtered->points.size() << " data filtered points to " << filename << "." << std::endl;
+    LOG(INFO)<< "Saved " << map_filtered->points.size() << " data filtered's size["
+             <<filter_res<<"] points to " << filename;
   }
-  std::cout<<"map_points save finished!!!"<<std::endl;
+  LOG(INFO)<<"map_points save finished.";
 }
 
 static void imu_odom_calc(ros::Time current_time)
@@ -289,46 +269,6 @@ static void imu_odom_calc(ros::Time current_time)
   previous_time = current_time;
 }
 
-void AddPoseToNavPath(nav_msgs::Path& path, const pose& pose, std::string frame_id="world"){
-    geometry_msgs::PoseStamped pose_stamped;
-    pose_stamped.header.stamp = ros::Time::now();
-    pose_stamped.header.frame_id = frame_id;
-    pose_stamped.pose.position.x = pose.x - init_pose.translation().x();//init_pos_.x();
-    pose_stamped.pose.position.y = pose.y - init_pose.translation().y();//init_pos_.y();
-    pose_stamped.pose.position.z = pose.z - init_pose.translation().z();//init_pos_.z();
-    pose_stamped.pose.orientation.w = 0;//pose->q.w();
-    pose_stamped.pose.orientation.x = 0;//pose->q.x();
-    pose_stamped.pose.orientation.y = 0;//pose->q.y();
-    pose_stamped.pose.orientation.z = 0;//pose->q.z();
-    path.header = pose_stamped.header;
-    path.poses.push_back(pose_stamped);
-}
-
-static void callback_gnss(const geometry_msgs::PoseStamped::ConstPtr &input){
-  static bool init_flag = false;
-  
-  if(!init_flag) {
-    init_pose = Eigen::Translation3d(input->pose.position.x, input->pose.position.y, input->pose.position.z) 
-                * Eigen::Quaterniond(input->pose.orientation.w, input->pose.orientation.x, input->pose.orientation.y, input->pose.orientation.z);
-    init_flag = true;
-    // return;
-  }
-
-  Eigen::Affine3d cur_pose(Eigen::Translation3d(input->pose.position.x, input->pose.position.y, input->pose.position.z) 
-                * Eigen::Quaterniond(input->pose.orientation.w, input->pose.orientation.x, input->pose.orientation.y, input->pose.orientation.z));
-  // cur_pose = init_pose.inverse() * cur_pose;
-
-  Eigen::Quaterniond q(cur_pose.linear());
-  tf::Matrix3x3 matrix_q(tf::Quaternion(q.x(), q.y(), q.z(), q.w()));
-  matrix_q.getRPY(guess_pose_odom.roll, guess_pose_odom.pitch, guess_pose_odom.yaw);
-  guess_pose_odom.x = cur_pose.translation().x();
-  guess_pose_odom.y = cur_pose.translation().y();
-  guess_pose_odom.z = cur_pose.translation().z();
-  ROS_INFO_STREAM("raw-gps-pose:"<<guess_pose_odom.x<<" "<<guess_pose_odom.y<<" "<<guess_pose_odom.z);
-  static nav_msgs::Path path;
-  AddPoseToNavPath(path, guess_pose_odom);
-  gps_pose_pub.publish(path);
-}
 static void odom_calc(ros::Time current_time)
 {
   static ros::Time previous_time = current_time;
@@ -437,11 +377,9 @@ static void odom_callback(const nav_msgs::Odometry::ConstPtr& input)
 {
   // std::cout << __func__ << std::endl;
 
-  // odom = *input;
-  // odom_calc(input->header.stamp);
+  odom = *input;
+  odom_calc(input->header.stamp);
 }
-
-
 
 static void imuUpsideDown(const sensor_msgs::Imu::Ptr input)
 {
@@ -519,8 +457,46 @@ static void imu_callback(const sensor_msgs::Imu::Ptr& input)
   previous_imu_yaw = imu_yaw;
 }
 
+Eigen::Matrix4f TransformPoseToEigenMatrix4f(const pose &ref){
+  Eigen::AngleAxisf x_rotation_vec(ref.roll, Eigen::Vector3f::UnitX());
+  Eigen::AngleAxisf y_rotation_vec(ref.pitch, Eigen::Vector3f::UnitY());
+  Eigen::AngleAxisf z_rotation_vec(ref.yaw, Eigen::Vector3f::UnitZ());
+
+  Eigen::Translation3f t(ref.x, ref.y, ref.z);
+  return (t * z_rotation_vec * y_rotation_vec * x_rotation_vec).matrix();
+}
+
+static bool init_flag = false;
+static Eigen::Affine3d init_pose = Eigen::Affine3d::Identity();
+static void gnss_callback(const geometry_msgs::PoseStamped::ConstPtr &input){ 
+  if(!init_flag) {
+    init_pose = Eigen::Translation3d(input->pose.position.x, input->pose.position.y, input->pose.position.z) 
+                * Eigen::Quaterniond(input->pose.orientation.w, input->pose.orientation.x, input->pose.orientation.y, input->pose.orientation.z);
+    init_flag = true;
+  }
+  LOG(INFO)<<std::fixed<<std::setprecision(6)
+           <<"real-time gnss(global):"<<input->pose.position.x<<", "<<input->pose.position.y<<", "<<input->pose.position.z;
+
+  Eigen::Affine3d cur_pose(Eigen::Translation3d(input->pose.position.x, input->pose.position.y, input->pose.position.z) 
+                * Eigen::Quaterniond(input->pose.orientation.w, input->pose.orientation.x, input->pose.orientation.y, input->pose.orientation.z));
+  cur_pose = init_pose.inverse() * cur_pose;
+
+  Eigen::Quaterniond q(cur_pose.linear());
+  tf::Matrix3x3 matrix_q(tf::Quaternion(q.x(), q.y(), q.z(), q.w()));
+  matrix_q.getRPY(guess_pose_odom.roll, guess_pose_odom.pitch, guess_pose_odom.yaw);
+  guess_pose_odom.x = cur_pose.translation().x();
+  guess_pose_odom.y = cur_pose.translation().y();
+  guess_pose_odom.z = cur_pose.translation().z();
+  LOG(INFO)<<std::fixed<<std::setprecision(6)
+           <<"real-time gnss(local):"<<guess_pose_odom.x<<", "<<guess_pose_odom.y<<", "<<guess_pose_odom.z;
+  // static nav_msgs::Path path;
+  // AddPoseToNavPath(path, guess_pose_odom);
+  // gps_pose_pub.publish(path);
+}
+
 static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
 {
+  if(!init_flag) return;
   double r;
   pcl::PointXYZI p;
   pcl::PointCloud<pcl::PointXYZI> tmp, scan;
@@ -550,21 +526,25 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
       scan.push_back(p);
     }
   }
-  if(scan.empty()) return;
+
   pcl::PointCloud<pcl::PointXYZI>::Ptr scan_ptr(new pcl::PointCloud<pcl::PointXYZI>(scan));
 
   // Add initial point cloud to velodyne_map
   if (initial_scan_loaded == 0)
   {
+    // pcl::transformPointCloud(*scan_ptr, *transformed_scan_ptr, tf_btol);
+    // map += *transformed_scan_ptr;
+    // initial_scan_loaded = 1;
+
+    //me
+    LOG(INFO)<<std::fixed<<std::setprecision(6)
+           <<"init_world_pose:"<<guess_pose_odom.x<<", "<<guess_pose_odom.y<<", "<<guess_pose_odom.z;
     Eigen::Matrix4f init_pose_matrix = TransformPoseToEigenMatrix4f(guess_pose_odom);
     init_pose_matrix *= tf_btol;
-    std::cout<<"init_world_pose:"<<guess_pose_odom.x<<" "<<guess_pose_odom.y<<" "<<guess_pose_odom.z<<std::endl;
     pcl::transformPointCloud(*scan_ptr, *transformed_scan_ptr, init_pose_matrix);//tf_btol即lidar在body中坐标, 即body进行旋转和平移后得lidar坐标系
-    // pcl::transformPointCloud(*scan_ptr, *transformed_scan_ptr, tf_btol);
     map += *transformed_scan_ptr;
     initial_scan_loaded = 1;
   }
-  std::cout<<"real gps odom1:"<<guess_pose_odom.x<<" "<<guess_pose_odom.y<<" "<<guess_pose_odom.z<<std::endl;
 
   // Apply voxelgrid filter
   pcl::VoxelGrid<pcl::PointXYZI> voxel_grid_filter;
@@ -581,7 +561,6 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
     ndt.setResolution(ndt_res);
     ndt.setMaximumIterations(max_iter);
     ndt.setInputSource(filtered_scan_ptr);
-    ROS_INFO_STREAM("filtered_scan_ptr:"<<filtered_scan_ptr->size());
   }
   else if (_method_type == MethodType::PCL_ANH)
   {
@@ -629,46 +608,42 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
 #endif
     is_first_map = false;
   }
-  // std::cout<<"real gps odom2:"<<guess_pose_odom.x<<" "<<guess_pose_odom.y<<" "<<guess_pose_odom.z<<std::endl;
-  guess_pose.x = previous_pose.x + diff_x;//guess_pose初始为零
+
+  guess_pose.x = previous_pose.x + diff_x;
   guess_pose.y = previous_pose.y + diff_y;
   guess_pose.z = previous_pose.z + diff_z;
   guess_pose.roll = previous_pose.roll;
   guess_pose.pitch = previous_pose.pitch;
   guess_pose.yaw = previous_pose.yaw + diff_yaw;
 
-  // if (_use_imu == true && _use_odom == true)
-  //   imu_odom_calc(current_scan_time);
-  // if (_use_imu == true && _use_odom == false)
-  //   imu_calc(current_scan_time);
+  if (_use_imu == true && _use_odom == true)
+    imu_odom_calc(current_scan_time);
+  if (_use_imu == true && _use_odom == false)
+    imu_calc(current_scan_time);
+  //this way
   // if (_use_imu == false && _use_odom == true)
-    // odom_calc(current_scan_time);
-  // std::cout<<"real gps odom3:"<<guess_pose_odom.x<<" "<<guess_pose_odom.y<<" "<<guess_pose_odom.z<<std::endl;
+  //   odom_calc(current_scan_time);
+
   pose guess_pose_for_ndt;
-  // if (_use_imu == true && _use_odom == true)
-  //   guess_pose_for_ndt = guess_pose_imu_odom;
-  // else if (_use_imu == true && _use_odom == false)
-  //   guess_pose_for_ndt = guess_pose_imu;
-  // else if (_use_imu == false && _use_odom == true)
+  if (_use_imu == true && _use_odom == true)
+    guess_pose_for_ndt = guess_pose_imu_odom;
+  else if (_use_imu == true && _use_odom == false)
+    guess_pose_for_ndt = guess_pose_imu;
+  //this way
+  else if (_use_imu == false && _use_odom == true)
     guess_pose_for_ndt = guess_pose_odom;
-    // ROS_INFO_STREAM("ndt-gps-pose:"<<guess_pose_odom.x<<" "<<guess_pose_odom.y<<" "<<guess_pose_odom.z);
-  // else
-  //   guess_pose_for_ndt = guess_pose;
-  
-  // std::cout<<"guess_pose_odom: "<<guess_pose_odom.x<<" "
-  //                          <<guess_pose_odom.y<<" "<<guess_pose_odom.z<<std::endl;
-  // std::cout<<"guess_pose_for_ndt: "<<guess_pose_for_ndt.x<<" "
-  //                          <<guess_pose_for_ndt.y<<" "<<guess_pose_for_ndt.z<<std::endl;
+  else
+    guess_pose_for_ndt = guess_pose;
+
   Eigen::AngleAxisf init_rotation_x(guess_pose_for_ndt.roll, Eigen::Vector3f::UnitX());
   Eigen::AngleAxisf init_rotation_y(guess_pose_for_ndt.pitch, Eigen::Vector3f::UnitY());
   Eigen::AngleAxisf init_rotation_z(guess_pose_for_ndt.yaw, Eigen::Vector3f::UnitZ());
 
   Eigen::Translation3f init_translation(guess_pose_for_ndt.x, guess_pose_for_ndt.y, guess_pose_for_ndt.z);
-  
+
   Eigen::Matrix4f init_guess =
       (init_translation * init_rotation_z * init_rotation_y * init_rotation_x).matrix() * tf_btol;
-  // std::cout<<"init_guess: "<<guess_pose_for_ndt.x<<" "
-  //                          <<guess_pose_for_ndt.y<<" "<<guess_pose_for_ndt.z<<std::endl;
+
   t3_end = ros::Time::now();
   d3 = t3_end - t3_start;
 
@@ -678,14 +653,18 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
 
   if (_method_type == MethodType::PCL_GENERIC)
   {
-    ROS_INFO_STREAM("ndt-init-pos  :"<<init_guess(0,3)<<", "<<init_guess(1,3)<<", "<<init_guess(2,3));
+    LOG(INFO)<<std::fixed<<std::setprecision(6)
+           <<"init_guess:"<<init_guess(0, 3)<<" "
+                           <<init_guess(1, 3)<<" "<<init_guess(2, 3);
     ndt.align(*output_cloud, init_guess);
     fitness_score = ndt.getFitnessScore();
-    t_localizer = ndt.getFinalTransformation();//当前scan相对map的坐标
-    ROS_INFO_STREAM("ndt-result-pos:"<<t_localizer(0,3)<<", "<<t_localizer(1,3)<<", "<<t_localizer(2,3));
+    t_localizer = ndt.getFinalTransformation();
     has_converged = ndt.hasConverged();
     final_num_iteration = ndt.getFinalNumIteration();
     transformation_probability = ndt.getTransformationProbability();
+    LOG(INFO)<<std::fixed<<std::setprecision(6)
+           <<"ndt_regis map->frame:("<<map_ptr->size()<<" -> "<<filtered_scan_ptr->size()<<"),score:"
+           <<fitness_score<<", has_converged:"<<has_converged;
   }
   else if (_method_type == MethodType::PCL_ANH)
   {
@@ -715,18 +694,9 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
     final_num_iteration = omp_ndt.getFinalNumIteration();
   }
 #endif
-  std::cout<<"t_localizer: "<<t_localizer(0, 3)<<" "
-                           <<t_localizer(1, 3)<<" "<<t_localizer(2, 3)<<std::endl;
+
   t_base_link = t_localizer * tf_ltob;
-  std::cout<<"t_base_link: "<<t_base_link(0, 3)<<" "
-                           <<t_base_link(1, 3)<<" "<<t_base_link(2, 3)<<std::endl;
-  if(ofs_odom_pose.is_open()){
-    // Eigen::Quaternionf q(t_base_link.block(0,0,3,3).matrix());
-    Eigen::Quaternionf q(Eigen::Matrix3f(t_base_link.block(0,0,3,3)));
-    ofs_odom_pose<<current_scan_time.toSec()<<" "<<t_base_link(0,3)<<" "<<t_base_link(1,3)<<" "
-            <<t_base_link(2, 3)<<" "<<q.x()<<" "<<q.y()<<" "<<q.z()<<" "<<q.w()<<"\n";
-    // ofs_odom_pose.close();
-  }
+
   pcl::transformPointCloud(*scan_ptr, *transformed_scan_ptr, t_localizer);
 
   tf::Matrix3x3 mat_l, mat_b;
@@ -748,16 +718,6 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
   localizer_pose.y = t_localizer(1, 3);
   localizer_pose.z = t_localizer(2, 3);
   mat_l.getRPY(localizer_pose.roll, localizer_pose.pitch, localizer_pose.yaw, 1);
-  //publisher lidar-odom pose
-  static nav_msgs::Path path;
-  static auto  current_pose_test = init_pose;
-  current_pose_test = Eigen::Affine3d(t_localizer.cast<double>());
-  pose odom_pose;
-  odom_pose.x = current_pose_test.translation().x();
-  odom_pose.y = current_pose_test.translation().y();
-  odom_pose.z = current_pose_test.translation().z();
-  AddPoseToNavPath(path, odom_pose);
-  odom_pose_pub.publish(path);
 
   // Update ndt_pose.
   ndt_pose.x = t_base_link(0, 3);
@@ -776,13 +736,12 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
   q.setRPY(current_pose.roll, current_pose.pitch, current_pose.yaw);
   transform.setRotation(q);
 
-  br.sendTransform(tf::StampedTransform(transform, current_scan_time, "map", "base_link"));//map->base_link 即 base_link/map
+  br.sendTransform(tf::StampedTransform(transform, current_scan_time, "map", "base_link"));
 
   scan_duration = current_scan_time - previous_scan_time;
   double secs = scan_duration.toSec();
 
-  {
-    // Calculate the offset (curren_pos - previous_pos)
+  // Calculate the offset (curren_pos - previous_pos)
   diff_x = current_pose.x - previous_pose.x;
   diff_y = current_pose.y - previous_pose.y;
   diff_z = current_pose.z - previous_pose.z;
@@ -849,7 +808,6 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
   offset_imu_odom_roll = 0.0;
   offset_imu_odom_pitch = 0.0;
   offset_imu_odom_yaw = 0.0;
-  }
 
   // Calculate the shift between added_pos and current_pos
   double shift = sqrt(pow(current_pose.x - added_pose.x, 2.0) + pow(current_pose.y - added_pose.y, 2.0));
@@ -882,9 +840,9 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
 #endif
   }
 
-  // sensor_msgs::PointCloud2::Ptr map_msg_ptr(new sensor_msgs::PointCloud2);
-  // pcl::toROSMsg(*map_ptr, *map_msg_ptr);
-  // ndt_map_pub.publish(*map_msg_ptr);
+  sensor_msgs::PointCloud2::Ptr map_msg_ptr(new sensor_msgs::PointCloud2);
+  pcl::toROSMsg(*map_ptr, *map_msg_ptr);
+  ndt_map_pub.publish(*map_msg_ptr);
 
   q.setRPY(current_pose.roll, current_pose.pitch, current_pose.yaw);
   current_pose_msg.header.frame_id = "map";
@@ -897,90 +855,58 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
   current_pose_msg.pose.orientation.z = q.z();
   current_pose_msg.pose.orientation.w = q.w();
 
-  current_pose_pub.publish(current_pose_msg);//pub-topic "/current_pose"
+  current_pose_pub.publish(current_pose_msg);
 
+  // Write log
+  if (!ofs)
   {
-    // Write log
-     if (!ofs)
-     {
-       std::cerr << "Could not open " << filename << "." << std::endl;
-       exit(1);
-     }
-   
-     ofs << input->header.seq << ","
-         << input->header.stamp << ","
-         << input->header.frame_id << ","
-         << scan_ptr->size() << ","
-         << filtered_scan_ptr->size() << ","
-         << std::fixed << std::setprecision(5) << current_pose.x << ","
-         << std::fixed << std::setprecision(5) << current_pose.y << ","
-         << std::fixed << std::setprecision(5) << current_pose.z << ","
-         << current_pose.roll << ","
-         << current_pose.pitch << ","
-         << current_pose.yaw << ","
-         << final_num_iteration << ","
-         << fitness_score << ","
-         << ndt_res << ","
-         << step_size << ","
-         << trans_eps << ","
-         << max_iter << ","
-         << voxel_leaf_size << ","
-         << min_scan_range << ","
-         << max_scan_range << ","
-         << min_add_scan_shift << std::endl;
-   
-     // std::cout << "-----------------------------------------------------------------" << std::endl;
-     // std::cout << "Sequence number: " << input->header.seq << std::endl;
-     // std::cout << "Number of scan points: " << scan_ptr->size() << " points." << std::endl;
-     // std::cout << "Number of filtered scan points: " << filtered_scan_ptr->size() << " points." << std::endl;
-     // std::cout << "transformed_scan_ptr: " << transformed_scan_ptr->points.size() << " points." << std::endl;
-     // std::cout << "map: " << map.points.size() << " points." << std::endl;
-     // std::cout << "NDT has converged: " << has_converged << std::endl;
-     // std::cout << "Fitness score: " << fitness_score << std::endl;
-     // std::cout << "Number of iteration: " << final_num_iteration << std::endl;
-     // std::cout << "(x,y,z,roll,pitch,yaw):" << std::endl;
-     // std::cout << "(" << current_pose.x << ", " << current_pose.y << ", " << current_pose.z << ", " << current_pose.roll
-     //           << ", " << current_pose.pitch << ", " << current_pose.yaw << ")" << std::endl;
-     // std::cout << "Transformation Matrix:" << std::endl;
-     // std::cout << t_localizer << std::endl;
-     // std::cout << "shift: " << shift << std::endl;
-     // std::cout << "map.size:"<<map.size()<<std::endl;
-     // std::cout << "-----------------------------------------------------------------" << std::endl;
+    std::cerr << "Could not open " << filename << "." << std::endl;
+    exit(1);
   }
-  
-}
 
-void MappingTimerCallback(const ros::WallTimerEvent& event){
-    if(map.empty()) {
-      ROS_INFO_STREAM("map is empty, there is no data to pub!!!");
-    }
-    if(!pub_map.getNumSubscribers()) return;
+  ofs << input->header.seq << ","
+      << input->header.stamp << ","
+      << input->header.frame_id << ","
+      << scan_ptr->size() << ","
+      << filtered_scan_ptr->size() << ","
+      << std::fixed << std::setprecision(5) << current_pose.x << ","
+      << std::fixed << std::setprecision(5) << current_pose.y << ","
+      << std::fixed << std::setprecision(5) << current_pose.z << ","
+      << current_pose.roll << ","
+      << current_pose.pitch << ","
+      << current_pose.yaw << ","
+      << final_num_iteration << ","
+      << fitness_score << ","
+      << ndt_res << ","
+      << step_size << ","
+      << trans_eps << ","
+      << max_iter << ","
+      << voxel_leaf_size << ","
+      << min_scan_range << ","
+      << max_scan_range << ","
+      << min_add_scan_shift << std::endl;
 
-    pcl::PointCloud<pcl::PointXYZI>::Ptr map_cloud(new pcl::PointCloud<pcl::PointXYZI>(map));
-    pcl::octree::OctreePointCloud<pcl::PointXYZI> octree(0.08);
-    octree.setInputCloud(map_cloud);
-    octree.addPointsFromInputCloud();
-    
-    pcl::PointCloud<pcl::PointXYZI>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZI>());
-    octree.getOccupiedVoxelCenters(filtered->points);
-
-    filtered->header = map.header;
-    filtered->width = filtered->size();
-    filtered->height = 1;
-    filtered->is_dense = false;
-    filtered->header.frame_id = "world";
-
-    ROS_INFO_STREAM("Publish mapcloud, size:"<<filtered->size());
-    sensor_msgs::PointCloud2Ptr cloud_msg(new sensor_msgs::PointCloud2());
-    pcl::toROSMsg(*filtered, *cloud_msg);
-
-    pub_map.publish(cloud_msg);
+  std::cout << "-----------------------------------------------------------------" << std::endl;
+  std::cout << "Sequence number: " << input->header.seq << std::endl;
+  std::cout << "Number of scan points: " << scan_ptr->size() << " points." << std::endl;
+  std::cout << "Number of filtered scan points: " << filtered_scan_ptr->size() << " points." << std::endl;
+  std::cout << "transformed_scan_ptr: " << transformed_scan_ptr->points.size() << " points." << std::endl;
+  std::cout << "map: " << map.points.size() << " points." << std::endl;
+  std::cout << "NDT has converged: " << has_converged << std::endl;
+  std::cout << "Fitness score: " << fitness_score << std::endl;
+  std::cout << "Number of iteration: " << final_num_iteration << std::endl;
+  std::cout << "(x,y,z,roll,pitch,yaw):" << std::endl;
+  std::cout << "(" << current_pose.x << ", " << current_pose.y << ", " << current_pose.z << ", " << current_pose.roll
+            << ", " << current_pose.pitch << ", " << current_pose.yaw << ")" << std::endl;
+  std::cout << "Transformation Matrix:" << std::endl;
+  std::cout << t_localizer << std::endl;
+  std::cout << "shift: " << shift << std::endl;
+  std::cout << "-----------------------------------------------------------------" << std::endl;
 }
 
 int main(int argc, char** argv)
 {
-  {
-    previous_pose.x = 0.0;
+  previous_pose.x = 0.0;
   previous_pose.y = 0.0;
   previous_pose.z = 0.0;
   previous_pose.roll = 0.0;
@@ -1047,8 +973,6 @@ int main(int argc, char** argv)
   offset_imu_odom_roll = 0.0;
   offset_imu_odom_pitch = 0.0;
   offset_imu_odom_yaw = 0.0;
-  }
-  
 
   ros::init(argc, argv, "ndt_mapping");
 
@@ -1062,15 +986,15 @@ int main(int argc, char** argv)
   std::strftime(buffer, 80, "%Y%m%d_%H%M%S", pnow);
   filename = "ndt_mapping_" + std::string(buffer) + ".csv";
   ofs.open(filename.c_str(), std::ios::app);
-  std::cerr<<"ofs.filename:"<<filename<<std::endl;
+
   // write header for log file
   if (!ofs)
   {
     std::cerr << "Could not open " << filename << "." << std::endl;
     exit(1);
   }
-  {
-    ofs << "input->header.seq" << ","
+
+  ofs << "input->header.seq" << ","
       << "input->header.stamp" << ","
       << "input->header.frame_id" << ","
       << "scan_ptr->size()" << ","
@@ -1091,9 +1015,6 @@ int main(int argc, char** argv)
       << "min_scan_range" << ","
       << "max_scan_range" << ","
       << "min_add_scan_shift" << std::endl;
-  }
-  
- {
 
   // setting parameters
   int method_type_tmp = 0;
@@ -1104,8 +1025,6 @@ int main(int argc, char** argv)
   private_nh.getParam("imu_upside_down", _imu_upside_down);
   private_nh.getParam("imu_topic", _imu_topic);
   private_nh.getParam("incremental_voxel_update", _incremental_voxel_update);
-  private_nh.getParam("output_filename_ref", output_filename_ref);
-  private_nh.getParam("output_filename_odom", output_filename_odom);
 
   std::cout << "method_type: " << static_cast<int>(_method_type) << std::endl;
   std::cout << "use_odom: " << _use_odom << std::endl;
@@ -1113,17 +1032,7 @@ int main(int argc, char** argv)
   std::cout << "imu_upside_down: " << _imu_upside_down << std::endl;
   std::cout << "imu_topic: " << _imu_topic << std::endl;
   std::cout << "incremental_voxel_update: " << _incremental_voxel_update << std::endl;
-  std::cout << "output_filename_ref"<<output_filename_ref<<std::endl;
-  std::cout << "output_filename_odom"<< output_filename_odom<<std::endl;
 
-  if(!output_filename_odom.empty() && !output_filename_ref.empty()){
-    ofs_ref.open(output_filename_ref.c_str(), std::ios::app);
-    ofs_ref.setf(std::ios::fixed, std::ios::floatfield);
-    ofs_ref.precision(6);
-    ofs_odom_pose.open(output_filename_odom.c_str(), std::ios::app);
-    ofs_odom_pose.setf(std::ios::fixed, std::ios::floatfield);
-    ofs_odom_pose.precision(6);
-  }
   if (nh.getParam("tf_x", _tf_x) == false)
   {
     std::cout << "tf_x is not set." << std::endl;
@@ -1176,7 +1085,6 @@ int main(int argc, char** argv)
     exit(1);
   }
 #endif
- }
 
   Eigen::Translation3f tl_btol(_tf_x, _tf_y, _tf_z);                 // tl: translation
   Eigen::AngleAxisf rot_x_btol(_tf_roll, Eigen::Vector3f::UnitX());  // rot: rotation
@@ -1189,19 +1097,15 @@ int main(int argc, char** argv)
 
   ndt_map_pub = nh.advertise<sensor_msgs::PointCloud2>("/ndt_map", 1000);
   current_pose_pub = nh.advertise<geometry_msgs::PoseStamped>("/current_pose", 1000);
-  gps_pose_pub = nh.advertise<nav_msgs::Path>("/mapping/path/gps", 100);
-  odom_pose_pub     = nh.advertise<nav_msgs::Path>("/mapping/path/odom",100);
 
   ros::Subscriber param_sub = nh.subscribe("config/ndt_mapping", 10, param_callback);
-  ros::Subscriber output_sub = nh.subscribe("config/ndt_mapping_output", 10, output_callback);
+  
   ros::Subscriber odom_sub = nh.subscribe("/vehicle/odom", 100000, odom_callback);
-  ros::Subscriber gnss_sub = nh.subscribe("/gnss_pose", 10, callback_gnss);
-  ros::Subscriber points_sub = nh.subscribe("points_raw", 100000, points_callback);
   ros::Subscriber imu_sub = nh.subscribe(_imu_topic, 100000, imu_callback);
 
-  ros::WallTimer map_publish_timer = nh.createWallTimer(ros::WallDuration(10), MappingTimerCallback);
-  pub_map = nh.advertise<sensor_msgs::PointCloud2>("/mapping/localizer_map", 1);
-
+  ros::Subscriber gnss_sub = nh.subscribe("/gnss_pose", 10, gnss_callback);
+  ros::Subscriber points_sub = nh.subscribe("points_raw", 100000, points_callback);
+  ros::Subscriber output_sub = nh.subscribe("config/ndt_mapping_output", 10, output_callback);
   ros::spin();
 
   return 0;

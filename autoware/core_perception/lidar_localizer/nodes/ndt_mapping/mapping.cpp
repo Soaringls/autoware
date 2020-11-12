@@ -137,7 +137,7 @@ Eigen::Isometry3d Matrix2Isometry(const Eigen::Matrix4d matrix) {
 
 void InsCallback(const geometry_msgs::PoseStamped::ConstPtr &msgs){
    gps_mutex.lock();
-   if(gps_msgs.size() > 16000) gps_msgs.pop();
+   if(gps_msgs.size() > 30000) gps_msgs.pop();
    gps_msgs.push(msgs);
    gps_mutex.unlock();
 
@@ -152,6 +152,7 @@ void InsCallback(const geometry_msgs::PoseStamped::ConstPtr &msgs){
 }
 
 void FilterByDistance(PointCloudPtr cloud){
+    auto pts_num = cloud->size();
     PointCloudPtr filtered(new PointCloud);
     std::copy_if(cloud->begin(), cloud->end(), std::back_inserter(filtered->points),
       [&](const PointT& pt){
@@ -161,6 +162,8 @@ void FilterByDistance(PointCloudPtr cloud){
     );
     filtered->header = cloud->header;
     SetCloudAttributes(filtered);
+    auto pts_num_filtered = filtered->size();
+    LOG(INFO)<<std::fixed<<std::setprecision(6)<<"distance filtered:"<<pts_num-pts_num_filtered;
 }
 PointCloudPtr FilterCloudFrame(PointCloudPtr &input, const double leaf_size){
     //nan filter
@@ -181,15 +184,6 @@ PointCloudPtr FilterCloudFrame(PointCloudPtr &input, const double leaf_size){
     voxel_filter.setLeafSize(leaf_size, leaf_size, leaf_size);
     voxel_filter.setInputCloud(filtered);
     voxel_filter.filter(*voxel_filtered_pts);
-    //distance filter
-    // filtered->clear();
-    // filtered->reserve(voxel_filtered_pts->size());
-    // std::copy_if(voxel_filtered_pts->begin(), voxel_filtered_pts->end(), std::back_inserter(filtered->points),
-    //   [&](const PointT& pt){
-    //       double dist = pt.getVector3fMap().norm();
-    //       return dist > config.distance_near_thresh && dist < config.distance_far_thresh;
-    //   }
-    // );
 
     voxel_filtered_pts->header = input->header;
     SetCloudAttributes(voxel_filtered_pts);
@@ -339,8 +333,8 @@ bool RegisterPointCloud(const PointCloudPtr& target, const PointCloudPtr& source
 PointCloudPtr SegmentedCloud(PointCloudPtr cloud){
     auto header = cloud->header;
     lidar_segmentation_ptr->CloudMsgHandler(cloud);
-    auto seg_cloud = lidar_segmentation_ptr->GetSegmentedCloud();
-    // auto seg_cloud = lidar_segmentation_ptr->GetSegmentedCloudPure();
+    // auto seg_cloud = lidar_segmentation_ptr->GetSegmentedCloud();
+    auto seg_cloud = lidar_segmentation_ptr->GetSegmentedCloudPure();
     seg_cloud->header = header;
     return seg_cloud;
 }
@@ -350,7 +344,7 @@ bool AlignPointCloud(const PointCloudPtr& cloud_in, Eigen::Matrix4d& matrix, dou
     static uint32_t frame_cnt(1);
     PointCloudPtr source_ptr(new PointCloud);
     pcl::copyPointCloud(*cloud_in, *source_ptr);
-    // source_ptr = SegmentedCloud(source_ptr);
+    source_ptr = SegmentedCloud(source_ptr);
 
     static PointCloudPtr target_ptr(new PointCloud);
     if(!init){
@@ -446,7 +440,7 @@ void PointsCallback(const sensor_msgs::PointCloud2::ConstPtr &input){
     if(!init_pose_flag)
     { 
         if(!AlignPointCloud(point_msg, tf, fitness_score)){
-            LOG(INFO)<<"AlignPointCloud init success.";
+            LOG(INFO)<<"Align PointCloud init success.";
         }
         POSEPtr init_odom;
         if(!FindCorrespondGpsMsg(timestamp, init_odom)){
@@ -638,7 +632,7 @@ int main(int argc, char** argv) {
     }
     #endif
    
-//    lidar_segmentation_ptr.reset(new ceres_mapping::lidar_odom::LidarSegmentation(config.seg_config_file));
+   lidar_segmentation_ptr.reset(new ceres_mapping::lidar_odom::LidarSegmentation(config.seg_config_file));
    align_pointmatcher_ptr.reset(new AlignPointMatcher(config.icp_config_file));
    ceres_optimizer.SetConfig(config.ceres_config);
    
@@ -649,7 +643,7 @@ int main(int argc, char** argv) {
    pub_filtered = nh.advertise<sensor_msgs::PointCloud2>("/mapping/filtered_frame", 10);
 
    ros::Subscriber points_sub = nh.subscribe("/points_raw", 10000, PointsCallback);
-   ros::Subscriber gnss_sub   = nh.subscribe("/gnss_pose",  16000,  InsCallback);
+   ros::Subscriber gnss_sub   = nh.subscribe("/gnss_pose",  30000,  InsCallback);
 
    //mapping
 //    ros::WallTimer map_publish_timer = nh.createWallTimer(ros::WallDuration(config.map_cloud_update_interval), MappingTimerCallback);
