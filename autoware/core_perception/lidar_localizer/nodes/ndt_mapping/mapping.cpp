@@ -151,6 +151,17 @@ void InsCallback(const geometry_msgs::PoseStamped::ConstPtr &msgs){
    ins_pos_pub.publish(gps_path);
 }
 
+void FilterByDistance(PointCloudPtr cloud){
+    PointCloudPtr filtered(new PointCloud);
+    std::copy_if(cloud->begin(), cloud->end(), std::back_inserter(filtered->points),
+      [&](const PointT& pt){
+          double dist = pt.getVector3fMap().norm();
+          return dist > config.distance_near_thresh && dist < config.distance_far_thresh;
+      }
+    );
+    filtered->header = cloud->header;
+    SetCloudAttributes(filtered);
+}
 PointCloudPtr FilterCloudFrame(PointCloudPtr &input, const double leaf_size){
     //nan filter
     std::vector<int> indices;
@@ -171,22 +182,18 @@ PointCloudPtr FilterCloudFrame(PointCloudPtr &input, const double leaf_size){
     voxel_filter.setInputCloud(filtered);
     voxel_filter.filter(*voxel_filtered_pts);
     //distance filter
-    filtered->clear();
-    filtered->reserve(voxel_filtered_pts->size());
-    std::copy_if(voxel_filtered_pts->begin(), voxel_filtered_pts->end(), std::back_inserter(filtered->points),
-      [&](const PointT& pt){
-          double dist = pt.getVector3fMap().norm();
-          return dist > config.distance_near_thresh && dist < config.distance_far_thresh;
-      }
-    );
+    // filtered->clear();
+    // filtered->reserve(voxel_filtered_pts->size());
+    // std::copy_if(voxel_filtered_pts->begin(), voxel_filtered_pts->end(), std::back_inserter(filtered->points),
+    //   [&](const PointT& pt){
+    //       double dist = pt.getVector3fMap().norm();
+    //       return dist > config.distance_near_thresh && dist < config.distance_far_thresh;
+    //   }
+    // );
 
-    filtered->header = input->header;
-    SetCloudAttributes(filtered);
-
-    Eigen::Affine3d transform = Eigen::Affine3d::Identity();
-    transform.rotate (Eigen::AngleAxisd (config.lidar_yaw_calib_degree*M_PI/180, Eigen::Vector3d::UnitZ()));
-    pcl::transformPointCloud(*filtered, *filtered, transform);
-    return filtered;
+    voxel_filtered_pts->header = input->header;
+    SetCloudAttributes(voxel_filtered_pts);
+    return voxel_filtered_pts;
 }
 
 void AddKeyFrame(const double& time, const Eigen::Matrix4d& tf, const Eigen::Matrix4d& pose, 
@@ -424,7 +431,12 @@ void PointsCallback(const sensor_msgs::PointCloud2::ConstPtr &input){
     PointCloudPtr point_msg(new PointCloud);
     pcl::fromROSMsg(*input, *point_msg);
     point_msg = FilterCloudFrame(point_msg, config.voxel_filter_size);
+    FilterByDistance(point_msg);
     if(point_msg->size() == 0) return;
+    
+    Eigen::Affine3d transform = Eigen::Affine3d::Identity();
+    transform.rotate (Eigen::AngleAxisd (config.lidar_yaw_calib_degree*M_PI/180, Eigen::Vector3d::UnitZ()));
+    pcl::transformPointCloud(*point_msg, *point_msg, transform);
 
     Eigen::Matrix4d tf = Eigen::Matrix4d::Identity();
     double fitness_score = std::numeric_limits<double>::max();

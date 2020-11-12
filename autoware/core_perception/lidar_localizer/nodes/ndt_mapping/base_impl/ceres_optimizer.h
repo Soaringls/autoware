@@ -177,7 +177,7 @@ class CeresOptimizer{
     
   std::vector<POSEPtr> GetOptimizedResult() {
     std::vector<POSEPtr> result;
-    // odom_mutex_.lock();
+    odom_mutex_.lock();
     for(const auto elem : optimized_data_) {
       POSEPtr temp(new POSE);
       *temp = *elem;
@@ -187,7 +187,7 @@ class CeresOptimizer{
       temp->score= elem->score;
       result.push_back(temp);
     }
-    // odom_mutex_.unlock();
+    odom_mutex_.unlock();
     return result;
   }
 
