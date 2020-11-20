@@ -1049,7 +1049,7 @@ static void imu_callback(const sensor_msgs::Imu::Ptr& input) {
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr FilterCloudFrame(
-    pcl::PointCloud<pcl::PointXYZ>::Ptr& input, const double leaf_size = 0.1) {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr& input, const double leaf_size = 1) {
   // nan filter
   std::vector<int> indices;
   // LOG(INFO)<<"filter_nan=====1:"<<input->size();
@@ -1110,7 +1110,7 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
     pcl::fromROSMsg(*input, filtered_scan);
     pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_scan_ptr(
         new pcl::PointCloud<pcl::PointXYZ>(filtered_scan));
-    filtered_scan_ptr = FilterCloudFrame(filtered_scan_ptr, 0.1);
+    filtered_scan_ptr = FilterCloudFrame(filtered_scan_ptr);
 
     int scan_points_num = filtered_scan_ptr->size();
 
