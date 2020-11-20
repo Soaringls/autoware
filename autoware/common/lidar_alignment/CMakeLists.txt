@@ -50,7 +50,6 @@ add_library(${PROJECT_NAME} SHARED
    src/align_pointmatcher.cc
    src/config_loader.cc
    src/lidar_segmentation.cc
-  #  src/ceres_optimizer.cc
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -64,8 +63,7 @@ target_link_libraries(${PROJECT_NAME}
     "/usr/local/lib/libpointmatcher.so"
 )
 add_dependencies(${PROJECT_NAME} ${catkin_EXPORTED_TARGETS})
-# add_executable(align_test main.cc)
-# target_link_libraries(align_test ${PROJECT_NAME})
+
 install(
   TARGETS ${PROJECT_NAME}
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}

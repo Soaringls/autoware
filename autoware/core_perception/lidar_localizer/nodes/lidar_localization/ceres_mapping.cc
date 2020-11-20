@@ -1,24 +1,15 @@
 #define OUTPUT
 
+#include <autoware_config_msgs/ConfigNDTMapping.h>
+#include <autoware_config_msgs/ConfigNDTMappingOutput.h>
+#include <message_filters/subscriber.h>
+#include <message_filters/sync_policies/approximate_time.h>
 #include <pcl/io/io.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/octree/octree_search.h>
 #include <pcl/point_types.h>
 #include <pcl/registration/ndt.h>
 #include <pcl_conversions/pcl_conversions.h>
-
-#include <fstream>
-#include <iostream>
-#include <string>
-// #define CUDA_FOUND
-#ifdef CUDA_FOUND
-#include <ndt_gpu/NormalDistributionsTransform.h>
-#endif
-
-#include <autoware_config_msgs/ConfigNDTMapping.h>
-#include <autoware_config_msgs/ConfigNDTMappingOutput.h>
-#include <message_filters/subscriber.h>
-#include <message_filters/sync_policies/approximate_time.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float32.h>
@@ -26,7 +17,11 @@
 #include <tf/transform_datatypes.h>
 #include <visualization_msgs/MarkerArray.h>
 
-#include "base_impl/ceres_optimizer.h"
+#include <fstream>
+#include <iostream>
+#include <string>
+
+#include "ceres_optimizer.h"
 #include "lidar_alignment/align_pointmatcher.h"
 #include "lidar_alignment/lidar_segmentation.h"
 
@@ -107,24 +102,6 @@ visualization_msgs::MarkerArray marker_array;
 ros::Publisher ins_pos_pub, lio_pos_pub, optimized_pos_pub;
 ros::Publisher pub_filtered, pub_map;
 
-#ifdef CUDA_FOUND
-static gpu::GNormalDistributionsTransform ndt_gpu;
-#endif
-
-// todo
-void PublisherVisualiztion(ros::Publisher& pub, POSEPtr pose, int color[],
-                           std::string model = "") {
-  visualization_msgs::Marker marker_msg;
-
-  marker_msg.header.stamp = ros::Time(pose->time);
-  marker_msg.header.frame_id = "world";
-  marker_msg.action = visualization_msgs::Marker::ADD;
-  marker_msg.id = 0;
-  if (!model.empty()) {
-    marker_msg.type = visualization_msgs::Marker::MESH_RESOURCE;
-    marker_msg.mesh_resource = "/autoware/workspace/data/models/car.dae";
-  }
-}
 void SetCloudAttributes(PointCloudPtr& cloud, std::string frame_id = "world") {
   cloud->width = cloud->size();
   cloud->height = 1;
@@ -138,25 +115,7 @@ Eigen::Isometry3d Matrix2Isometry(const Eigen::Matrix4d matrix) {
   isometry.translation() = matrix.block<3, 1>(0, 3);
   return isometry;
 }
-// std::ostream& operator<<(std::ostream& os, const Eigen::Affine3d& pose) {
-//   Eigen::Translation3d t(pose.translation());
-//   Eigen::Quaterniond q(pose.linear());
-//   os << " x:" << t.x() << ", y:" << t.y() << ", z:" << t.z;
-//   return os;
-// }
-// std::ostream& operator<<(std::ostream& os, const Eigen::Matrix4d& pose) {
-//   os << " x:" << pose(0, 3) << ", y:" << pose(1, 3) << ", z:" << pose(2, 3);
-//   return os;
-// }
-// std::ostream& operator<<(std::ostream& os, const RawIMU& imu) {
-//   os << "  acc_x: " << imu.acc_x
-//      << ", acc_y: " << imu.acc_y
-//      << ", acc_z: " << imu.acc_z
-//      << ", v_x: " << imu.v_x
-//      << ", v_y: " << imu.v_y
-//      << ", v_z: " << imu.v_z;
-//   return os;
-// }
+
 void DumpPose(const Eigen::Affine3d pose, const std::string filename) {
   std::ofstream fo;
   fo.open(filename.c_str(), std::ofstream::out);
@@ -332,7 +291,7 @@ PointCloudPtr GenerateMap(double resolution = 0.05) {
 PointCloudPtr SegmentedCloud(PointCloudPtr cloud) {
   auto header = cloud->header;
   lidar_segmentation_ptr->CloudMsgHandler(cloud);
-  // auto seg_cloud = lidar_segmentation_ptr->GetSegmentedCloud();
+
   auto seg_cloud = lidar_segmentation_ptr->GetSegmentedCloudPure();
   seg_cloud->header = header;
   return seg_cloud;
@@ -365,11 +324,9 @@ bool AlignPointCloud(const PointCloudPtr& cloud_in, Eigen::Matrix4d& matrix,
     ndt_matching.setInputSource(source_ptr);
     PointCloudPtr output(new PointCloud);
     ndt_matching.align(*output, init_guss);
-    LOG(INFO) << "ndt init guess:" << init_guss(0, 3) << ", "
-              << init_guss(1, 3);
+
     init_guss = ndt_matching.getFinalTransformation();
-    LOG(INFO) << "ndt result guess:" << init_guss(0, 3) << ", "
-              << init_guss(1, 3);
+
     matrix = init_guss.cast<double>();
     score = ndt_matching.getFitnessScore();
     is_converged = ndt_matching.hasConverged();
@@ -479,8 +436,6 @@ void PointsCallback(const sensor_msgs::PointCloud2::ConstPtr& input) {
     init_pose_flag = true;
     // dump map's init pose
     DumpPose(init_pose, config.map_init_position_file);
-    // LOG(INFO) << std::fixed << std::setprecision(6)
-    //           << "ins_init(global):" << init_pose;
     global_map = *point_msg;
 
     return;
@@ -540,8 +495,6 @@ void PointsCallback(const sensor_msgs::PointCloud2::ConstPtr& input) {
   ceres_optimizer.InsertOdom(lio_factor);
 
   lio_pose *= tf;
-  // add keyframe TODO
-  // point_msg = SegmentedCloud(point_msg); //test the lidar-seg
   AddKeyFrame(timestamp, tf, ins_pose_affine3d.matrix(), point_msg);
 
   // insert gps data to optimizer
@@ -569,9 +522,6 @@ void PointsCallback(const sensor_msgs::PointCloud2::ConstPtr& input) {
 }
 
 void MappingTimerCallback(const ros::TimerEvent&) {
-  // void MappingTimerCallbackWall(const ros::WallTimerEvent& event){
-
-  // while(1){
   Timer t;
   LOG(INFO) << "================mapping timer callback====================";
   if (!pub_map.getNumSubscribers()) return;
@@ -589,9 +539,6 @@ void MappingTimerCallback(const ros::TimerEvent&) {
   LOG(WARNING)
       << "Generating map cloud is done, and publish success.elspaed's time:"
       << t.end() << " [ms]";
-  //   std::chrono::milliseconds dura(10000);
-  //   std::this_thread::sleep_for(dura);
-  // }
 }
 
 static void output_callback(
@@ -628,7 +575,8 @@ static void output_callback(
     LOG(INFO) << "filter map done, from(" << pts_original << "->"
               << map_data_ptr->size() << ")";
   }
-  pcl::io::savePCDFileASCII(filename, *map_data_ptr);
+  // pcl::io::savePCDFileASCII(filename, *map_data_ptr);
+  pcl::io::savePCDFileBinary(filename, *map_data_ptr);
   LOG(INFO) << "Saved " << map_data_ptr->points.size() << " pts success!!!";
 }
 
@@ -729,13 +677,8 @@ int main(int argc, char** argv) {
       nh.subscribe("/points_raw", 10000, PointsCallback);
   ros::Subscriber gnss_sub = nh.subscribe("/gnss_pose", 30000, InsCallback);
 
-  // mapping
-  //    ros::WallTimer map_publish_timer =
-  //    nh.createWallTimer(ros::WallDuration(config.map_cloud_update_interval),
-  //    MappingTimerCallback);
   ros::Timer map_publish_timer =
-      nh.createTimer(ros::Duration(5.0), MappingTimerCallback);  // todo check
-  //    auto mapping_thread = std::thread(MappingTimerCallback);
+      nh.createTimer(ros::Duration(5.0), MappingTimerCallback);
   pub_map = nh.advertise<sensor_msgs::PointCloud2>("/mapping/localizer_map", 1);
   ros::Subscriber output_sub =
       nh.subscribe("config/ndt_mapping_output", 10, output_callback);

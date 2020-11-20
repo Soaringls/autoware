@@ -64,7 +64,7 @@ void CeresOptimizer::Optimize() {
 
       // add params
       odom_mutex_.lock();
-      Timer t;
+      // Timer t;
       int length = optimized_data_.size();
       double to_optimized_t[length][3];
       double to_optimized_q[length][4];
@@ -86,18 +86,6 @@ void CeresOptimizer::Optimize() {
       // ceres::AddResidualBlock-odom and gps's residuals
       for (int i = 0; i < length - 1; ++i) {
         if (i + 1 < length) {
-          // LOG(INFO)<<"Create odom's cost
-          // func:["<<std::fixed<<std::setprecision(6)<<i<<":"<<odom_data_[i]->pos.x()<<",
-          // "
-          //                 <<odom_data_[i]->pos.y()<<",
-          //                 "<<odom_data_[i]->pos.z()<<"]";
-
-          // LOG(INFO)<<"Create odom's cost
-          // func--score:"<<odom_data_[i]->score<<" config:"<<config_.var_odom_t
-          //               <<" socre*cofig:"<<odom_data_[i]->score *
-          //               config_.var_odom_t;
-          // double info_var_t = config_.var_odom_t -
-          // 0.01*odom_data_[i]->score*config_.var_odom_t;
           double info_var_t = config_.var_odom_t;
           ceres::CostFunction* cost_odom_func =
               mapping::OdomCostFunction::create(
@@ -113,11 +101,6 @@ void CeresOptimizer::Optimize() {
 
         for (int j = 0; j < gps_data_.size(); ++j) {
           if (gps_data_[j]->time == odom_data_[i]->time) {
-            // LOG(INFO)<<"Create GPS's cost
-            // func:["<<std::fixed<<std::setprecision(6)<<i<<":"<<gps_data_[j]->pos.x()<<",
-            // "
-            //                  <<gps_data_[j]->pos.y()<<",
-            //                  "<<gps_data_[j]->pos.z()<<"]";
             ceres::CostFunction* cost_func_gps =
                 mapping::GPSCostFunction::create(
                     gps_data_[j]->pos.x(), gps_data_[j]->pos.y(),
@@ -132,17 +115,12 @@ void CeresOptimizer::Optimize() {
       ceres::Solve(GetCeresSolverOptions(), &problem, &summary);
       LOG(INFO) << "ceres::summary:" << summary.BriefReport();
 
-      // update optimized pose problem.AddResidualBlock(cost_func_gps,
-      // loss_function_anchor, to_optimized_t[i]);
-
       for (int i = 0; i < length; ++i) {
-        POSEPtr optimized_result(new POSE);
         optimized_data_[i]->pos = Eigen::Vector3d(
             to_optimized_t[i][0], to_optimized_t[i][1], to_optimized_t[i][2]);
         optimized_data_[i]->q =
             Eigen::Quaterniond(to_optimized_q[i][0], to_optimized_q[i][1],
                                to_optimized_q[i][2], to_optimized_q[i][3]);
-        // optimized_data_[i] = optimized_result;
         if (i == length - 1) {
           W_BODY.block<3, 3>(0, 0) =
               Eigen::Quaterniond(to_optimized_q[i][0], to_optimized_q[i][1],
@@ -155,7 +133,7 @@ void CeresOptimizer::Optimize() {
         }
       }
       UpdateOptimizedPath();
-      LOG(INFO) << "ceres-optimizer, elspaed's time:" << t.end() << " [ms]";
+      // LOG(INFO) << "ceres-optimizer, elspaed's time:" << t.end() << " [ms]";
       odom_mutex_.unlock();
     }
     std::chrono::milliseconds dura(1000);

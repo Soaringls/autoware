@@ -50,8 +50,6 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
-#include <mutex>
-#include <queue>
 #include <sstream>
 #include <string>
 #ifdef CUDA_FOUND
@@ -95,10 +93,6 @@ enum class MethodType {
 };
 static MethodType _method_type = MethodType::PCL_GENERIC;
 
-double config_time_threshold = 0.02;
-std::mutex gps_mutex;
-std::queue<geometry_msgs::PoseStamped::ConstPtr> gps_msgs;
-
 static pose initial_pose, predict_pose, predict_pose_imu, predict_pose_odom,
     predict_pose_imu_odom, previous_pose, ndt_pose, current_pose,
     current_pose_imu, current_pose_odom, current_pose_imu_odom, localizer_pose;
@@ -120,7 +114,6 @@ static int map_loaded = 0;
 static int _use_gnss = 1;
 static int init_pos_set = 0;
 static Eigen::Vector3d map_init_pos = Eigen::Vector3d(0, 0, 0);
-static Eigen::Affine3d map_init_pose = Eigen::Affine3d::Identity();
 
 static pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt;
 static cpu::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> anh_ndt;
@@ -263,19 +256,12 @@ void SetMapInitPos(const std::string& map_init_filename) {
   while (getline(ifs, line)) {
     if (line.empty()) continue;
     std::vector<std::string> parts;
-    boost::split(parts, line, boost::is_any_of(" "));
+    boost::split(parts, line, boost::is_any_of(","));
     if (parts.empty()) {
       LOG(FATAL) << "there is empty in the file!";
     }
-    // map_init_pos = Eigen::Vector3d(std::stod(parts[0]), std::stod(parts[1]),
-    // std::stod(parts[2]));
-    Eigen::Quaterniond q(std::stod(parts[3]), std::stod(parts[4]),
-                         std::stod(parts[5]), std::stod(parts[6]));
-
-    map_init_pose =
-        Eigen::Translation3d(std::stod(parts[0]), std::stod(parts[1]),
-                             std::stod(parts[2])) *
-        q.normalized();
+    map_init_pos = Eigen::Vector3d(std::stod(parts[0]), std::stod(parts[1]),
+                                   std::stod(parts[2]));
   }
   ifs.close();
 }
@@ -297,34 +283,6 @@ void AddPoseToNavPath(nav_msgs::Path& path, const pose& pose,
   pose_stamped.pose.orientation.z = 0;       // pose->q.z();
   path.header = pose_stamped.header;
   path.poses.push_back(pose_stamped);
-}
-
-bool FindCorrespondGpsMsg(const double pts_stamp, Eigen::Affine3d& ins_pose) {
-  bool is_find(false);
-  gps_mutex.lock();
-  while (!gps_msgs.empty()) {
-    auto stamp_diff = gps_msgs.front()->header.stamp.toSec() - pts_stamp;
-    if (std::abs(stamp_diff) <= config_time_threshold) {
-      auto gps_msg = gps_msgs.front();
-      ins_pose = Eigen::Translation3d(gps_msg->pose.position.x,
-                                      gps_msg->pose.position.y,
-                                      gps_msg->pose.position.z) *
-                 Eigen::Quaterniond(
-                     gps_msg->pose.orientation.w, gps_msg->pose.orientation.x,
-                     gps_msg->pose.orientation.y, gps_msg->pose.orientation.z);
-      gps_msgs.pop();
-      is_find = true;
-      break;
-    } else if (stamp_diff < -config_time_threshold) {
-      gps_msgs.pop();
-    } else if (stamp_diff > config_time_threshold) {
-      LOG(INFO) << "(gps_time - pts_time = " << stamp_diff
-                << ") lidar msgs is delayed! ";
-      break;
-    }
-  }
-  gps_mutex.unlock();
-  return is_find;
 }
 
 static pose convertPoseIntoRelativeCoordinate(const pose& target_pose,
@@ -538,27 +496,17 @@ static void map_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
     }
 
     // temp
+    for (auto& pt : map.points) {
+      pt.x += map_init_pos[0];
+      pt.y += map_init_pos[1];
+      pt.z += map_init_pos[2];
+    }
     for (int i = 0; i < 20; i++) {
       LOG(INFO) << std::fixed << std::setprecision(6)
-                << "evaleate before:" << map.points[i].x << ", "
-                << map.points[i].y;
+                << "evaleate:" << map.points[i].x << ", " << map.points[i].y;
     }
-    auto t = map_init_pose.translation();
-    LOG(INFO) << std::fixed << std::setprecision(6) << "map_init:" << t.x()
-              << ", " << t.y();
-    pcl::transformPointCloud(map, map, map_init_pose.matrix());
-    // for(auto& pt : map.points){
-    //   pt.x += map_init_pos[0];
-    //   pt.y += map_init_pos[1];
-    //   pt.z += map_init_pos[2];
-    // }
     pcl::PointCloud<pcl::PointXYZ>::Ptr map_ptr(
         new pcl::PointCloud<pcl::PointXYZ>(map));
-    for (int i = 0; i < 20; i++) {
-      LOG(INFO) << std::fixed << std::setprecision(6)
-                << "evaleate after:" << map_ptr->points[i].x << ", "
-                << map_ptr->points[i].y;
-    }
 
     // Setting point cloud to be aligned to.
     if (_method_type == MethodType::PCL_GENERIC) {
@@ -646,10 +594,6 @@ static void map_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
 // INIT_init_pos_set = 1; callback of topic:"gnss_pose"
 static void gnss_callback(const geometry_msgs::PoseStamped::ConstPtr& input) {
   static bool init_flag = false;
-  gps_mutex.lock();
-  if (gps_msgs.size() > 500) gps_msgs.pop();
-  gps_msgs.push(input);
-  gps_mutex.unlock();
 
   if (!init_flag) {
     init_pose =
@@ -1084,9 +1028,9 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr FilterCloudFrame(
   // SetCloudAttributes(filtered);
 
   Eigen::Affine3d transform = Eigen::Affine3d::Identity();
-  // transform.rotate(
-  //     Eigen::AngleAxisd(90 * M_PI / 180, Eigen::Vector3d::UnitZ()));
-  // pcl::transformPointCloud(*filtered, *filtered, transform);
+  transform.rotate(
+      Eigen::AngleAxisd(90 * M_PI / 180, Eigen::Vector3d::UnitZ()));
+  pcl::transformPointCloud(*filtered, *filtered, transform);
   return filtered;
 }
 
@@ -1104,7 +1048,6 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
     pcl::PointCloud<pcl::PointXYZ> filtered_scan;
 
     ros::Time current_scan_time = input->header.stamp;
-    double timestamp = input->header.stamp.toSec();
     static ros::Time previous_scan_time = current_scan_time;
 
     pcl::fromROSMsg(*input, filtered_scan);
@@ -1185,18 +1128,9 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
                                       Eigen::Vector3f::UnitY());
     Eigen::AngleAxisf init_rotation_z(predict_pose_for_ndt.yaw,
                                       Eigen::Vector3f::UnitZ());
-    // Eigen::Matrix4f init_guess = (init_translation * init_rotation_z *
-    //                               init_rotation_y * init_rotation_x) *
-    //                              tf_btol;
-
-    // test
-    Eigen::Affine3d real_ins = Eigen::Affine3d::Identity();
-    static Eigen::Affine3d last_ins;
-    if (!FindCorrespondGpsMsg(timestamp, real_ins)) {
-      real_ins = last_ins;
-    }
-    last_ins = real_ins;
-    Eigen::Matrix4f init_guess = real_ins.matrix().cast<float>();
+    Eigen::Matrix4f init_guess = (init_translation * init_rotation_z *
+                                  init_rotation_y * init_rotation_x) *
+                                 tf_btol;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr output_cloud(
         new pcl::PointCloud<pcl::PointXYZ>);
@@ -1950,8 +1884,8 @@ int main(int argc, char** argv) {
   ros::Subscriber imu_sub =
       nh.subscribe(_imu_topic.c_str(), _queue_size * 10, imu_callback);
 
-  gps_path_pub = nh.advertise<nav_msgs::Path>("/lidar_locator/path/ins", 100);
-  lio_path_pub = nh.advertise<nav_msgs::Path>("/lidar_locator/path/lio", 100);
+  gps_path_pub = nh.advertise<nav_msgs::Path>("/mapping/path/ins", 100);
+  lio_path_pub = nh.advertise<nav_msgs::Path>("/mapping/path/lio", 100);
 
   pthread_t thread;
   pthread_create(&thread, NULL, thread_func, NULL);
