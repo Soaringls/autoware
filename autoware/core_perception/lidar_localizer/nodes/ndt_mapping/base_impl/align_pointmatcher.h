@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ros/ros.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pointmatcher/Parametrizable.h>
@@ -49,13 +48,16 @@ class AlignPointMatcher {
   bool Align(const typename pcl::PointCloud<PointT>::ConstPtr reference_cloud,
              const typename pcl::PointCloud<PointT>::ConstPtr reading_cloud,
              Eigen::Matrix4d& trans_matrix, double& score);
-
+  bool setmap(const std::string& map_file);
   template <typename PointT>
   bool SetMap(const typename pcl::PointCloud<PointT>::ConstPtr reference_coud);
   template <typename PointT>
   bool AlignWithMap(const typename pcl::PointCloud<PointT>::ConstPtr reading_cloud,
             Eigen::Matrix4d& trans_matrix, double& score); 
-
+  
+  bool AlignTest(const pcl::PointCloud<pcl::PointXYZI>::ConstPtr reading_cloud,
+                 const pcl::PointCloud<pcl::PointXYZI>::ConstPtr ref_cloud,
+                 Eigen::Matrix4d& tf, double& score);
   struct Config {
     double max_trans;
     double max_angle;

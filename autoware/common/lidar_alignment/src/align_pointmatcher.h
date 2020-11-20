@@ -11,19 +11,19 @@
 #include <boost/filesystem/fstream.hpp>
 #include <deque>
 #include <fstream>
-
-// #include "ranger_base/util.hpp"
-// #include "ranger_base/utility.hpp"
+#include "lidar_config.h"
 #include "yaml-cpp/yaml.h"
+// #include "pointmatcher_macro.h"
 
-namespace common {
-const float DEG_TO_RAD = M_PI / 180.0;
-const float RAD_TO_DEG = 180 / M_PI;
+namespace lidar_alignment{
+// namespace common {
+// const float DEG_TO_RAD = M_PI / 180.0;
+// const float RAD_TO_DEG = 180 / M_PI;
 
-const double DEG_TO_RAD_D = M_PI / 180.0;
-const double RAD_TO_DEG_D = 180 / M_PI;
+// const double DEG_TO_RAD_D = M_PI / 180.0;
+// const double RAD_TO_DEG_D = 180 / M_PI;
 
-}  // namespace common
+// }  // namespace common
 
 class AlignPointMatcher {
  public:
@@ -43,18 +43,21 @@ class AlignPointMatcher {
   }
   AlignPointMatcher(const std::string& yaml_file);
   ~AlignPointMatcher() = default;
+  
+  bool Align(const DP& reference_cloud, const DP& reading_cloud, Eigen::Matrix4d& trans_matrix,
+             double& score, const Eigen::Matrix4d& init_matrix = Eigen::Matrix4d::Identity());
 
   template <typename PointT>
   bool Align(const typename pcl::PointCloud<PointT>::ConstPtr reference_cloud,
              const typename pcl::PointCloud<PointT>::ConstPtr reading_cloud,
              Eigen::Matrix4d& trans_matrix, double& score);
-  bool setmap(const std::string& map_file);
+  
   template <typename PointT>
   bool SetMap(const typename pcl::PointCloud<PointT>::ConstPtr reference_coud);
   template <typename PointT>
   bool AlignWithMap(const typename pcl::PointCloud<PointT>::ConstPtr reading_cloud,
             Eigen::Matrix4d& trans_matrix, double& score); 
-
+  
   struct Config {
     double max_trans;
     double max_angle;
@@ -87,3 +90,5 @@ class AlignPointMatcher {
   // evaluate score:haussdorff distance
   std::shared_ptr<PM::Matcher> matcher_hausdorff_;
 };
+
+}

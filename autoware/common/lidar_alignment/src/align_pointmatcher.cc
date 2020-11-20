@@ -1,5 +1,6 @@
-#include "align_pointmatcher.h"
+#include "./align_pointmatcher.h"
 
+namespace lidar_alignment{
 AlignPointMatcher::AlignPointMatcher(const std::string& yaml_file) {
   std::ifstream ifs(yaml_file.c_str());
   if (boost::filesystem::extension(yaml_file) != ".yaml" || !ifs.good()) {
@@ -115,15 +116,6 @@ template bool AlignPointMatcher::Align<pcl::PointXYZI>(
     const typename pcl::PointCloud<pcl::PointXYZI>::ConstPtr reading_cloud,
     Eigen::Matrix4d& trans_matrix, double& score);
 
-//set map
-bool AlignPointMatcher::setmap(const std::string& map_file){
-  std::string map_file11 = "/autoware/workspace/data/map/map_hengtong/hengtong_1106_local.pcd";
-  DP map(DP::load(map_file11));
-  LOG(INFO)<<"set map to aligner, size2:";
-  icp_sequence_.setMap(map);
-  LOG(INFO)<<"set map to aligner, size3:";
-  return true;
-}
 template <typename PointT>
 bool AlignPointMatcher::SetMap(const typename pcl::PointCloud<PointT>::ConstPtr reference_cloud){
   LOG(INFO)<<"set map to aligner, size--:"<<reference_cloud->size();
@@ -139,6 +131,18 @@ template bool AlignPointMatcher::SetMap<pcl::PointXYZ>(
 template bool AlignPointMatcher::SetMap<pcl::PointXYZI>(
       const typename pcl::PointCloud<pcl::PointXYZI>::ConstPtr reference_coud);
 
+
+bool AlignPointMatcher::Align(const DP& reference_cloud, const DP& reading_cloud, Eigen::Matrix4d& trans_matrix,
+             double& score, const Eigen::Matrix4d& init_matrix){
+  LOG(INFO)<<"alignPointMatcher::aling-ref:"
+           <<reference_cloud.features.cols()<<", reading:"<<reading_cloud.features.cols();
+  DP ref_pts = reference_cloud;
+  DP reading_pts = reading_cloud;
+  trans_matrix = icp(reading_pts, ref_pts, init_matrix);
+  LOG(INFO)<<"-----";
+  CalOdomRobustScore(score);
+  return true;
+}
 //align with map
 template <typename PointT>
 bool AlignPointMatcher::AlignWithMap(
@@ -201,4 +205,6 @@ void AlignPointMatcher::CalHaussdorffScore(
 
   score = std::sqrt(max_robust_dist2);
   LOG(INFO)<<"libpointmatcher hausdorff_dist(ref->reading):" << score;
+}
+
 }

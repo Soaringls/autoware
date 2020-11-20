@@ -8,8 +8,7 @@
 #include <boost/circular_buffer.hpp>
 #include "config_loader.h"
 
-namespace ceres_mapping {
-namespace lidar_odom{
+namespace lidar_alignment{
 
 struct SegmentedCloudMsg {
   //record start and end segmented point index of each line
@@ -86,5 +85,4 @@ class LidarSegmentation{
 typedef std::shared_ptr<LidarSegmentation> LidarSegmentationPtr;
 typedef std::shared_ptr<const LidarSegmentation> LidarSegmentationConstPtr;
 
-}
 }

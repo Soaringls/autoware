@@ -1,6 +1,5 @@
 #include "config_loader.h"
-namespace ceres_mapping {
-namespace lidar_odom{
+namespace lidar_alignment{
 
 void LoadLidarConfig(const std::string& config_yaml_file){
     if(!boost::filesystem::exists(config_yaml_file)){
@@ -73,4 +72,4 @@ void LoadExtrinsic(const std::string& config_file) {
     std::uint32_t timestamp = config["header"]["stamp"]["secs"].as<std::uint32_t>();
 }
 
-}}
+}

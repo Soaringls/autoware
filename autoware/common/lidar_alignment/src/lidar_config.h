@@ -9,8 +9,7 @@
 
 #include "singleton_base.h"
 
-namespace ceres_mapping {
-namespace lidar_odom{
+namespace lidar_alignment {
 
 namespace common{
     const float  DEG_TO_RAD = M_PI / 180;
@@ -78,5 +77,4 @@ class LidarFrameConfig : public SingleInstance<LidarFrameConfig>{
   int instance_cnt_;
 };
 
-}
 }

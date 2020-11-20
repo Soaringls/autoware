@@ -15,6 +15,8 @@
   <!-- nmea2tfpose -->
   <include file="$(find gnss_localizer)/launch/nmea2tfpose.launch"/>
   <node pkg="lidar_localizer" type="ndt_mapping" name="ndt_mapping" output="screen">
+    <param name="map_init_pos_file" value="/autoware/workspace/data/map/hengtong_1115_map_init.txt" />
+    <param name="config_time_threshold" value="0.10" />
     <param name="method_type" value="$(arg method_type)" />
     <param name="use_imu" value="$(arg use_imu)" />
     <param name="use_odom" value="$(arg use_odom)" />

@@ -1,7 +1,6 @@
 #include "lidar_segmentation.h"
 
-namespace ceres_mapping {
-namespace lidar_odom{
+namespace lidar_alignment{
 
 LidarSegmentation::LidarSegmentation(const std::string& lidar_config_file) {
     LoadLidarConfig(lidar_config_file);
@@ -352,5 +351,4 @@ void LidarSegmentation::cloudClusters() {
   }
 }
 
-}//end space lidar-odom
 }

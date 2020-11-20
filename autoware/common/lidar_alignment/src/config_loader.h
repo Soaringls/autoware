@@ -8,10 +8,9 @@
 #include <yaml-cpp/yaml.h>
 #include "lidar_config.h"
 
-namespace ceres_mapping {
-namespace lidar_odom{
+namespace lidar_alignment{
 
 void LoadLidarConfig(const std::string& config_yaml_file);
 void LoadExtrinsic(const std::string& config_file);
 
-}}
+}

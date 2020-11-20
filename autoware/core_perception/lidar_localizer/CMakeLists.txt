@@ -103,11 +103,11 @@ set(THIRD_DEPS
   "/usr/local/lib/libpointmatcher.so"
 )
 
-add_executable(icp_matching_neolix nodes/icp_matching_neolix/icp_matching.cpp)
-target_link_libraries(icp_matching_neolix ${THIRD_DEPS})
+# add_executable(icp_matching_neolix nodes/icp_matching_neolix/icp_matching.cpp)
+# target_link_libraries(icp_matching_neolix ${THIRD_DEPS})
 
-add_executable(test_ethicp nodes/icp_matching_neolix/main.cc)
-target_link_libraries(test_ethicp ${THIRD_DEPS})
+# add_executable(test_ethicp nodes/icp_matching_neolix/main.cc)
+# target_link_libraries(test_ethicp ${THIRD_DEPS})
 
 
 add_executable(ndt_matching nodes/ndt_matching/ndt_matching.cpp)
@@ -190,11 +190,25 @@ target_link_libraries(ceres_mapping ${THIRD_DEPS})
 # )
 # add_dependencies(ceres_mapping ${catkin_EXPORTED_TARGETS})
 
+add_executable(lidar_mapping 
+               nodes/lidar_mapping/main.cc
+               nodes/lidar_mapping/slam.cc
+               nodes/lidar_mapping/align_util.cc
+               nodes/lidar_mapping/align_pointmatcher.cc
+               )
+target_link_libraries(lidar_mapping ${THIRD_DEPS})
+add_executable(lidar_mapping_ndt nodes/lidar_mapping/ndt_mapping.cc)
+target_link_libraries(lidar_mapping_ndt ${catkin_LIBRARIES} glog)
+add_dependencies(lidar_mapping_ndt ${catkin_EXPORTED_TARGETS} glog)
+
 install(
   TARGETS
+    lidar_mapping
+    lidar_mapping_ndt
+    
     approximate_ndt_mapping
     icp_matching
-    icp_matching_neolix
+    # icp_matching_neolix
     mapping
     ceres_mapping
     ndt_mapping

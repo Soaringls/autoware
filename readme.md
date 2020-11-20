@@ -25,3 +25,13 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/autoware/workspace/install/lidar_alignm
 
 colcon build --cmake-args -DCMAKE_BUILD_TYPE=Debug --packages-select lidar_localizer
 /autoware/workspace/data/map/2230-test.pcd
+
+## ros gdb debug
+```sh
+<node pkg="lidar_localizer" type="lidar_mapping" name="lidar_mapping" output="screen" launch-prefix="xterm -e gdb -ex run --args" >
+    <!-- time_config -->
+    <param name="gps_lidar_time_threshold" value="$(arg gps_lidar_time_threshold)" />
+    <!-- filter_params -->
+    
+  </node>
+```

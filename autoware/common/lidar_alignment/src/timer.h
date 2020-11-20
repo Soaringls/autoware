@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <chrono>
 
-namespace common{
+namespace lidar_alignment{
 class Timer
 {
   public:

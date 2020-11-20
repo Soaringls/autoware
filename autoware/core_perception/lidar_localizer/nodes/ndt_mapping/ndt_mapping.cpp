@@ -22,6 +22,9 @@
 
 #define OUTPUT  // If you want to output "position_log.txt", "#define OUTPUT".
 
+#include <queue>
+#include <vector>
+#include <mutex>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -75,6 +78,11 @@ enum class MethodType
   PCL_ANH_GPU = 2,
   PCL_OPENMP = 3,
 };
+
+double config_time_threshold = 0.02;
+std::string map_init_pos_file="";
+std::mutex gps_mutex;
+std::queue<geometry_msgs::PoseStamped::ConstPtr> gps_msgs;
 static MethodType _method_type = MethodType::PCL_GENERIC;
 
 // global variables
@@ -466,13 +474,63 @@ Eigen::Matrix4f TransformPoseToEigenMatrix4f(const pose &ref){
   return (t * z_rotation_vec * y_rotation_vec * x_rotation_vec).matrix();
 }
 
+bool FindCorrespondGpsMsg(const double pts_stamp, Eigen::Affine3d& ins_pose) {
+    bool is_find(false);
+    gps_mutex.lock();
+    while(!gps_msgs.empty()){
+        auto stamp_diff = gps_msgs.front()->header.stamp.toSec() - pts_stamp;
+        if(std::abs(stamp_diff) <= config_time_threshold) {
+            auto gps_msg = gps_msgs.front();
+            ins_pose = Eigen::Translation3d(gps_msg->pose.position.x, gps_msg->pose.position.y, gps_msg->pose.position.z) 
+                * Eigen::Quaterniond(gps_msg->pose.orientation.w, gps_msg->pose.orientation.x, gps_msg->pose.orientation.y, gps_msg->pose.orientation.z);
+            gps_msgs.pop();
+            is_find = true;
+            break;
+        } else if(stamp_diff < -config_time_threshold) {
+            gps_msgs.pop();
+        } else if(stamp_diff > config_time_threshold) {
+            LOG(INFO)<<"(gps_time - pts_time = "<<stamp_diff<<") lidar msgs is delayed! ";
+            break;
+        } 
+    }
+    gps_mutex.unlock();
+    return is_find;
+}
+
+void DumpPose(const Eigen::Affine3d pose, const std::string filename){
+  std::ofstream fo;
+  fo.open(filename.c_str(), std::ofstream::out);
+  if(fo.is_open()){
+    fo.setf(std::ios::fixed, std::ios::floatfield);
+    fo.precision(6);
+    Eigen::Quaterniond q(pose.linear());
+    Eigen::Translation3d t(pose.translation());
+    double qx = q.x();
+    double qy = q.y();
+    double qz = q.z();
+    double qw = q.w();
+    fo << t.x() << " " << t.y() << " " << t.z() << " " 
+       << qw<<" "<< qx << " " << qy << " " << qz <<"\n";
+    
+    fo.close();
+  } else {
+    LOG(WARNING) << "failed to dump pose optimized to the file:" << filename;
+  }
+}
 static bool init_flag = false;
 static Eigen::Affine3d init_pose = Eigen::Affine3d::Identity();
 static void gnss_callback(const geometry_msgs::PoseStamped::ConstPtr &input){ 
+  gps_mutex.lock();
+  gps_msgs.push(input);
+  gps_mutex.unlock();
+
   if(!init_flag) {
     init_pose = Eigen::Translation3d(input->pose.position.x, input->pose.position.y, input->pose.position.z) 
                 * Eigen::Quaterniond(input->pose.orientation.w, input->pose.orientation.x, input->pose.orientation.y, input->pose.orientation.z);
+    DumpPose(init_pose, map_init_pos_file);
     init_flag = true;
+    LOG(INFO)<<std::fixed<<std::setprecision(6)
+           <<"init gnss(global):"<<input->pose.position.x<<", "<<input->pose.position.y<<", "<<input->pose.position.z;
   }
   LOG(INFO)<<std::fixed<<std::setprecision(6)
            <<"real-time gnss(global):"<<input->pose.position.x<<", "<<input->pose.position.y<<", "<<input->pose.position.z;
@@ -510,6 +568,7 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
   tf::Transform transform;
 
   current_scan_time = input->header.stamp;
+  auto timestamp = input->header.stamp.toSec();
 
   pcl::fromROSMsg(*input, tmp);
 
@@ -537,11 +596,20 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
     // initial_scan_loaded = 1;
 
     //me
-    LOG(INFO)<<std::fixed<<std::setprecision(6)
-           <<"init_world_pose:"<<guess_pose_odom.x<<", "<<guess_pose_odom.y<<", "<<guess_pose_odom.z;
-    Eigen::Matrix4f init_pose_matrix = TransformPoseToEigenMatrix4f(guess_pose_odom);
-    init_pose_matrix *= tf_btol;
-    pcl::transformPointCloud(*scan_ptr, *transformed_scan_ptr, init_pose_matrix);//tf_btol即lidar在body中坐标, 即body进行旋转和平移后得lidar坐标系
+    // LOG(INFO)<<std::fixed<<std::setprecision(6)
+    //        <<"init_world_pose:"<<guess_pose_odom.x<<", "<<guess_pose_odom.y<<", "<<guess_pose_odom.z;
+    // Eigen::Matrix4f init_pose_matrix = TransformPoseToEigenMatrix4f(guess_pose_odom);
+    // init_pose_matrix *= tf_btol;
+    // pcl::transformPointCloud(*scan_ptr, *transformed_scan_ptr, init_pose_matrix);//tf_btol即lidar在body中坐标, 即body进行旋转和平移后得lidar坐标系
+    // map += *transformed_scan_ptr;
+    // initial_scan_loaded = 1;
+    Eigen::Affine3d lio_start = Eigen::Affine3d::Identity();
+    if(!FindCorrespondGpsMsg(timestamp, lio_start)){
+            LOG(INFO)<<"PointCloud Callback init failed!!!";
+            return;
+    }
+    auto init_pose_matrix = init_pose.inverse()*lio_start;//*tf_btol;
+    pcl::transformPointCloud(*scan_ptr, *transformed_scan_ptr, init_pose_matrix);
     map += *transformed_scan_ptr;
     initial_scan_loaded = 1;
   }
@@ -641,8 +709,18 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
 
   Eigen::Translation3f init_translation(guess_pose_for_ndt.x, guess_pose_for_ndt.y, guess_pose_for_ndt.z);
 
-  Eigen::Matrix4f init_guess =
-      (init_translation * init_rotation_z * init_rotation_y * init_rotation_x).matrix() * tf_btol;
+  // Eigen::Matrix4f init_guess =
+  //     (init_translation * init_rotation_z * init_rotation_y * init_rotation_x).matrix() * tf_btol;
+
+  //test
+  Eigen::Affine3d real_ins = Eigen::Affine3d::Identity();
+  if(!FindCorrespondGpsMsg(timestamp, real_ins)){
+    LOG(INFO)<<"failed to search ins_pose at:"<<std::fixed<<std::setprecision(6)
+             <<current_scan_time;
+    return;
+  }
+  Eigen::Matrix4f init_guess = (init_pose.inverse()*real_ins).matrix().cast<float>();
+
 
   t3_end = ros::Time::now();
   d3 = t3_end - t3_start;
@@ -701,12 +779,13 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input)
 
   tf::Matrix3x3 mat_l, mat_b;
 
+  //lidar tf
   mat_l.setValue(static_cast<double>(t_localizer(0, 0)), static_cast<double>(t_localizer(0, 1)),
                  static_cast<double>(t_localizer(0, 2)), static_cast<double>(t_localizer(1, 0)),
                  static_cast<double>(t_localizer(1, 1)), static_cast<double>(t_localizer(1, 2)),
                  static_cast<double>(t_localizer(2, 0)), static_cast<double>(t_localizer(2, 1)),
                  static_cast<double>(t_localizer(2, 2)));
-
+  //body tf
   mat_b.setValue(static_cast<double>(t_base_link(0, 0)), static_cast<double>(t_base_link(0, 1)),
                  static_cast<double>(t_base_link(0, 2)), static_cast<double>(t_base_link(1, 0)),
                  static_cast<double>(t_base_link(1, 1)), static_cast<double>(t_base_link(1, 2)),
@@ -1025,6 +1104,8 @@ int main(int argc, char** argv)
   private_nh.getParam("imu_upside_down", _imu_upside_down);
   private_nh.getParam("imu_topic", _imu_topic);
   private_nh.getParam("incremental_voxel_update", _incremental_voxel_update);
+  private_nh.getParam("config_time_threshold", config_time_threshold);
+  private_nh.getParam("map_init_pos_file", map_init_pos_file);
 
   std::cout << "method_type: " << static_cast<int>(_method_type) << std::endl;
   std::cout << "use_odom: " << _use_odom << std::endl;
@@ -1032,6 +1113,7 @@ int main(int argc, char** argv)
   std::cout << "imu_upside_down: " << _imu_upside_down << std::endl;
   std::cout << "imu_topic: " << _imu_topic << std::endl;
   std::cout << "incremental_voxel_update: " << _incremental_voxel_update << std::endl;
+  std::cout << "config_time_threshold: " << config_time_threshold << std::endl;
 
   if (nh.getParam("tf_x", _tf_x) == false)
   {
