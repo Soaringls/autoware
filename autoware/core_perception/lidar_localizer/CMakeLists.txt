@@ -172,7 +172,10 @@ target_link_libraries(ceres_mapping ${THIRD_DEPS})
 
 add_executable(lidar_matching 
                nodes/lidar_localization/lidar_matching.cpp)
-target_link_libraries(lidar_matching ${THIRD_DEPS})
+target_link_libraries(lidar_matching glog 
+${Boost_LIBRARIES}
+${catkin_LIBRARIES})
+add_dependencies(lidar_matching ${catkin_EXPORTED_TARGETS})
 
 add_executable(map_convert nodes/lidar_localization/map_convert.cc)
 target_link_libraries(map_convert ${THIRD_DEPS})

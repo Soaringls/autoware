@@ -1077,7 +1077,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr FilterCloudFrame(
                std::back_inserter(filtered->points),
                [&](const pcl::PointXYZ& pt) {
                  double dist = pt.getVector3fMap().norm();
-                 return dist > 5 && dist < 60;
+                 return dist > 1 && dist < 50;
                });
 
   filtered->header = input->header;
