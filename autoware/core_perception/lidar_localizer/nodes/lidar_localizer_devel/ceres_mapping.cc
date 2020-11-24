@@ -26,7 +26,7 @@
 #include <tf/transform_datatypes.h>
 #include <visualization_msgs/MarkerArray.h>
 
-#include "base_impl/ceres_optimizer.h"
+#include "ceres_impl/ceres_optimizer.h"
 #include "lidar_alignment/align_pointmatcher.h"
 #include "lidar_alignment/lidar_segmentation.h"
 

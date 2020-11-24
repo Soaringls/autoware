@@ -1,0 +1,25 @@
+<!-- -->
+<launch>
+  <!-- lidar_mapping -->
+  <node pkg="lidar_localizer" type="lidar_mapping" name="lidar_mapping" output="screen" >
+    <!-- init -->
+    <param name="seg_config_yaml" value="/autoware/workspace/data/params/lidar_odometry_config.yaml" />
+    <!-- preprocess -->
+    <param name="lidar_yaw_calib_degree" value="90" />
+
+    <!-- filter_params -->
+    <param name="time_synchronize_threshold" value="0.02" />
+
+    <!-- time_config -->
+    <param name="distance_near_thresh" value="2" />
+    <param name="distance_far_thresh" value="50" />
+    <param name="voxel_filter_size" value="0.12" />
+    <param name="octree_filter_resol" value="0.1" />
+     
+    <!-- lidar-alignemtn -->
+    <param name="input_frame_dist" value="0.15" />
+    <param name="submap_length" value="50" />
+    <param name="submap_frame_resol" value="0.7" />
+  </node>
+
+</launch>

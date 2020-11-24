@@ -78,7 +78,7 @@ void AlignSLAM::SaveMap(const std::string map_filename,
     LOG(INFO) << "filtered map's size:" << map_ptr->size();
 
     map_ptr->header.frame_id = "map";
-    pcl::io::savePCDFileASCII(map_filename, *map_ptr);
+    pcl::io::savePCDFileBinary(map_filename, *map_ptr);
     LOG(INFO) << "generate map done, map's size:" << map_ptr->size();
   }
 

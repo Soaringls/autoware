@@ -210,6 +210,9 @@ target_link_libraries(lidar_matching_ndt
                       ${catkin_LIBRARIES})
 add_dependencies(lidar_matching_ndt ${catkin_EXPORTED_TARGETS})
 
+add_executable(map_convert nodes/lidar_localizer_devel/map_convert.cc)
+target_link_libraries(map_convert ${THIRD_DEPS})
+
 install(
   TARGETS
     ceres_ndt_mapping
