@@ -54,12 +54,7 @@
 #include <queue>
 #include <sstream>
 #include <string>
-#ifdef CUDA_FOUND
-#include <ndt_gpu/NormalDistributionsTransform.h>
-#endif
-#ifdef USE_PCL_OPENMP
-#include <pcl_omp_registration/ndt.h>
-#endif
+
 
 #include <autoware_config_msgs/ConfigNDT.h>
 #include <autoware_msgs/NDTStat.h>
@@ -124,14 +119,8 @@ static Eigen::Affine3d map_init_pose = Eigen::Affine3d::Identity();
 
 static pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt;
 static cpu::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> anh_ndt;
-#ifdef CUDA_FOUND
-static std::shared_ptr<gpu::GNormalDistributionsTransform> anh_gpu_ndt_ptr =
-    std::make_shared<gpu::GNormalDistributionsTransform>();
-#endif
-#ifdef USE_PCL_OPENMP
-static pcl_omp::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>
-    omp_ndt;
-#endif
+
+
 
 // Default values
 static int max_iter = 30;        // Maximum iterations
@@ -234,6 +223,7 @@ static std_msgs::Float32 ndt_reliability;
 
 static bool _get_height = false;
 static bool _use_local_transform = false;
+static bool local_coordinationg = true;
 static bool _use_imu = false;
 static bool _use_odom = false;
 static bool _imu_upside_down = false;
@@ -256,7 +246,8 @@ pthread_mutex_t mutex;
 
 void SetMapInitPos(const std::string& map_init_filename) {
   if (!boost::filesystem::exists(map_init_filename)) {
-    LOG(FATAL) << "file:" << map_init_filename << " is not exist!";
+    LOG(WARNING) << "file:" << map_init_filename << " is not exist!";
+    return;
   }
   std::ifstream ifs(map_init_filename, std::ios::in);
   std::string line = "";
@@ -265,7 +256,8 @@ void SetMapInitPos(const std::string& map_init_filename) {
     std::vector<std::string> parts;
     boost::split(parts, line, boost::is_any_of(" "));
     if (parts.empty()) {
-      LOG(FATAL) << "there is empty in the file!";
+      LOG(INFO) << "there is empty in the file!";
+      return;
     }
     // map_init_pos = Eigen::Vector3d(std::stod(parts[0]), std::stod(parts[1]),
     // std::stod(parts[2]));
@@ -280,6 +272,24 @@ void SetMapInitPos(const std::string& map_init_filename) {
   ifs.close();
 }
 
+void AddPoseToNavPath(nav_msgs::Path& path, const Eigen::Affine3d& pose,
+                      std::string frame_id = "world") {
+  Eigen::Translation3d t(pose.translation());
+  Eigen::Quaterniond q(pose.linear());
+
+  geometry_msgs::PoseStamped pose_stamped;
+  pose_stamped.header.stamp = ros::Time::now();
+  pose_stamped.header.frame_id = frame_id;
+  pose_stamped.pose.position.x = t.x();
+  pose_stamped.pose.position.y = t.y();
+  pose_stamped.pose.position.z = t.z();
+  pose_stamped.pose.orientation.w = q.w();       // pose->q.w();
+  pose_stamped.pose.orientation.x = q.x();       // pose->q.x();
+  pose_stamped.pose.orientation.y = q.y();       // pose->q.y();
+  pose_stamped.pose.orientation.z = q.z();       // pose->q.z();
+  path.header = pose_stamped.header;
+  path.poses.push_back(pose_stamped);
+}
 void AddPoseToNavPath(nav_msgs::Path& path, const pose& pose,
                       std::string frame_id = "world") {
   geometry_msgs::PoseStamped pose_stamped;
@@ -297,6 +307,11 @@ void AddPoseToNavPath(nav_msgs::Path& path, const pose& pose,
   pose_stamped.pose.orientation.z = 0;       // pose->q.z();
   path.header = pose_stamped.header;
   path.poses.push_back(pose_stamped);
+}
+
+void Clear(std::queue<geometry_msgs::PoseStamped::ConstPtr>& q) {
+	std::queue<geometry_msgs::PoseStamped::ConstPtr> empty;
+	std::swap(empty, q);
 }
 
 bool FindCorrespondGpsMsg(const double pts_stamp, Eigen::Affine3d& ins_pose) {
@@ -320,6 +335,8 @@ bool FindCorrespondGpsMsg(const double pts_stamp, Eigen::Affine3d& ins_pose) {
     } else if (stamp_diff > config_time_threshold) {
       LOG(INFO) << "(gps_time - pts_time = " << stamp_diff
                 << ") lidar msgs is delayed! ";
+      // gps_msgs.clear();
+      Clear(gps_msgs);
       break;
     }
   }
@@ -376,14 +393,7 @@ static void param_callback(
       ndt.setResolution(ndt_res);
     else if (_method_type == MethodType::PCL_ANH)
       anh_ndt.setResolution(ndt_res);
-#ifdef CUDA_FOUND
-    else if (_method_type == MethodType::PCL_ANH_GPU)
-      anh_gpu_ndt_ptr->setResolution(ndt_res);
-#endif
-#ifdef USE_PCL_OPENMP
-    else if (_method_type == MethodType::PCL_OPENMP)
-      omp_ndt.setResolution(ndt_res);
-#endif
+
   }
 
   if (input->step_size != step_size) {
@@ -393,14 +403,7 @@ static void param_callback(
       ndt.setStepSize(step_size);
     else if (_method_type == MethodType::PCL_ANH)
       anh_ndt.setStepSize(step_size);
-#ifdef CUDA_FOUND
-    else if (_method_type == MethodType::PCL_ANH_GPU)
-      anh_gpu_ndt_ptr->setStepSize(step_size);
-#endif
-#ifdef USE_PCL_OPENMP
-    else if (_method_type == MethodType::PCL_OPENMP)
-      omp_ndt.setStepSize(ndt_res);
-#endif
+
   }
 
   if (input->trans_epsilon != trans_eps) {
@@ -410,14 +413,7 @@ static void param_callback(
       ndt.setTransformationEpsilon(trans_eps);
     else if (_method_type == MethodType::PCL_ANH)
       anh_ndt.setTransformationEpsilon(trans_eps);
-#ifdef CUDA_FOUND
-    else if (_method_type == MethodType::PCL_ANH_GPU)
-      anh_gpu_ndt_ptr->setTransformationEpsilon(trans_eps);
-#endif
-#ifdef USE_PCL_OPENMP
-    else if (_method_type == MethodType::PCL_OPENMP)
-      omp_ndt.setTransformationEpsilon(ndt_res);
-#endif
+
   }
 
   if (input->max_iterations != max_iter) {
@@ -427,14 +423,7 @@ static void param_callback(
       ndt.setMaximumIterations(max_iter);
     else if (_method_type == MethodType::PCL_ANH)
       anh_ndt.setMaximumIterations(max_iter);
-#ifdef CUDA_FOUND
-    else if (_method_type == MethodType::PCL_ANH_GPU)
-      anh_gpu_ndt_ptr->setMaximumIterations(max_iter);
-#endif
-#ifdef USE_PCL_OPENMP
-    else if (_method_type == MethodType::PCL_OPENMP)
-      omp_ndt.setMaximumIterations(ndt_res);
-#endif
+
   }
 
   if (_use_gnss == 0 && init_pos_set == 0) {
@@ -597,48 +586,6 @@ static void map_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
       anh_ndt = new_anh_ndt;
       pthread_mutex_unlock(&mutex);
     }
-#ifdef CUDA_FOUND
-    else if (_method_type == MethodType::PCL_ANH_GPU) {
-      std::shared_ptr<gpu::GNormalDistributionsTransform> new_anh_gpu_ndt_ptr =
-          std::make_shared<gpu::GNormalDistributionsTransform>();
-      new_anh_gpu_ndt_ptr->setResolution(ndt_res);
-      new_anh_gpu_ndt_ptr->setInputTarget(map_ptr);
-      new_anh_gpu_ndt_ptr->setMaximumIterations(max_iter);
-      new_anh_gpu_ndt_ptr->setStepSize(step_size);
-      new_anh_gpu_ndt_ptr->setTransformationEpsilon(trans_eps);
-
-      pcl::PointCloud<pcl::PointXYZ>::Ptr dummy_scan_ptr(
-          new pcl::PointCloud<pcl::PointXYZ>());
-      pcl::PointXYZ dummy_point;
-      dummy_scan_ptr->push_back(dummy_point);
-      new_anh_gpu_ndt_ptr->setInputSource(dummy_scan_ptr);
-
-      new_anh_gpu_ndt_ptr->align(Eigen::Matrix4f::Identity());
-
-      pthread_mutex_lock(&mutex);
-      anh_gpu_ndt_ptr = new_anh_gpu_ndt_ptr;
-      pthread_mutex_unlock(&mutex);
-    }
-#endif
-#ifdef USE_PCL_OPENMP
-    else if (_method_type == MethodType::PCL_OPENMP) {
-      pcl_omp::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>
-          new_omp_ndt;
-      pcl::PointCloud<pcl::PointXYZ>::Ptr output_cloud(
-          new pcl::PointCloud<pcl::PointXYZ>);
-      new_omp_ndt.setResolution(ndt_res);
-      new_omp_ndt.setInputTarget(map_ptr);
-      new_omp_ndt.setMaximumIterations(max_iter);
-      new_omp_ndt.setStepSize(step_size);
-      new_omp_ndt.setTransformationEpsilon(trans_eps);
-
-      new_omp_ndt.align(*output_cloud, Eigen::Matrix4f::Identity());
-
-      pthread_mutex_lock(&mutex);
-      omp_ndt = new_omp_ndt;
-      pthread_mutex_unlock(&mutex);
-    }
-#endif
     map_loaded = 1;
   }
 }
@@ -651,13 +598,14 @@ static void gnss_callback(const geometry_msgs::PoseStamped::ConstPtr& input) {
   gps_msgs.push(input);
   gps_mutex.unlock();
 
-  if (!init_flag) {
-    init_pose =
+  Eigen::Affine3d current_ins =  
         Eigen::Translation3d(input->pose.position.x, input->pose.position.y,
                              input->pose.position.z) *
         Eigen::Quaterniond(input->pose.orientation.w, input->pose.orientation.x,
                            input->pose.orientation.y,
                            input->pose.orientation.z);
+  if (!init_flag) {
+    init_pose = current_ins;
     init_flag = true;
     // return;
   }
@@ -674,7 +622,8 @@ static void gnss_callback(const geometry_msgs::PoseStamped::ConstPtr& input) {
                 current_gnss_pose.yaw);
 
   static nav_msgs::Path ins_path;
-  AddPoseToNavPath(ins_path, current_gnss_pose);
+  // AddPoseToNavPath(ins_path, current_gnss_pose);
+  AddPoseToNavPath(ins_path, map_init_pose.inverse()*current_ins);
   gps_path_pub.publish(ins_path);  // pub ins path
 
   static pose previous_gnss_pose = current_gnss_pose;
@@ -1127,14 +1076,7 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
       ndt.setInputSource(filtered_scan_ptr);
     else if (_method_type == MethodType::PCL_ANH)
       anh_ndt.setInputSource(filtered_scan_ptr);
-#ifdef CUDA_FOUND
-    else if (_method_type == MethodType::PCL_ANH_GPU)
-      anh_gpu_ndt_ptr->setInputSource(filtered_scan_ptr);
-#endif
-#ifdef USE_PCL_OPENMP
-    else if (_method_type == MethodType::PCL_OPENMP)
-      omp_ndt.setInputSource(filtered_scan_ptr);
-#endif
+
 
     // Guess the initial gross estimation of the transformation
     double diff_time = (current_scan_time - previous_scan_time).toSec();
@@ -1218,11 +1160,11 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
 
       trans_probability = ndt.getTransformationProbability();
 
+      // LOG(INFO) << std::fixed << std::setprecision(6)
+      //           << "init guess:" << init_guess(0, 3) << ", " << init_guess(1, 3)
+      //           << ", score:" << fitness_score;
       LOG(INFO) << std::fixed << std::setprecision(6)
-                << "init guess:" << init_guess(0, 3) << ", " << init_guess(1, 3)
-                << ", score:" << fitness_score;
-      LOG(INFO) << std::fixed << std::setprecision(6)
-                << "ndt result:" << t(0, 3) << ", " << t(1, 3);
+                << "ndt result:" << t(0, 3) << ", " << t(1, 3)<< ", score:" << fitness_score;
     } else if (_method_type == MethodType::PCL_ANH) {
       align_start = std::chrono::system_clock::now();
       anh_ndt.align(init_guess);
@@ -1239,42 +1181,6 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
 
       trans_probability = anh_ndt.getTransformationProbability();
     }
-#ifdef CUDA_FOUND
-    else if (_method_type == MethodType::PCL_ANH_GPU) {
-      align_start = std::chrono::system_clock::now();
-      anh_gpu_ndt_ptr->align(init_guess);
-      align_end = std::chrono::system_clock::now();
-
-      has_converged = anh_gpu_ndt_ptr->hasConverged();
-
-      t = anh_gpu_ndt_ptr->getFinalTransformation();
-      iteration = anh_gpu_ndt_ptr->getFinalNumIteration();
-
-      getFitnessScore_start = std::chrono::system_clock::now();
-      fitness_score = anh_gpu_ndt_ptr->getFitnessScore();
-      getFitnessScore_end = std::chrono::system_clock::now();
-
-      trans_probability = anh_gpu_ndt_ptr->getTransformationProbability();
-    }
-#endif
-#ifdef USE_PCL_OPENMP
-    else if (_method_type == MethodType::PCL_OPENMP) {
-      align_start = std::chrono::system_clock::now();
-      omp_ndt.align(*output_cloud, init_guess);
-      align_end = std::chrono::system_clock::now();
-
-      has_converged = omp_ndt.hasConverged();
-
-      t = omp_ndt.getFinalTransformation();
-      iteration = omp_ndt.getFinalNumIteration();
-
-      getFitnessScore_start = std::chrono::system_clock::now();
-      fitness_score = omp_ndt.getFitnessScore();
-      getFitnessScore_end = std::chrono::system_clock::now();
-
-      trans_probability = omp_ndt.getTransformationProbability();
-    }
-#endif
     align_time = std::chrono::duration_cast<std::chrono::microseconds>(
                      align_end - align_start)
                      .count() /
@@ -1305,7 +1211,8 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
                  1);
 
     static nav_msgs::Path lio_path;
-    AddPoseToNavPath(lio_path, localizer_pose);
+    // AddPoseToNavPath(lio_path, localizer_pose);
+    AddPoseToNavPath(lio_path, Eigen::Affine3d(map_init_pose.matrix().inverse() * t.cast<double>()));
     lio_path_pub.publish(lio_path);  // pub lio path
 
     tf::Matrix3x3 mat_b;  // base_link   ndt_pose == t2 即cur_pose
@@ -1500,6 +1407,24 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
     predict_pose_imu_odom_msg.pose.orientation.z = predict_q_imu_odom.z();
     predict_pose_imu_odom_msg.pose.orientation.w = predict_q_imu_odom.w();
     predict_pose_imu_odom_pub.publish(predict_pose_imu_odom_msg);
+
+    //local pose
+    if (local_coordinationg == true) {
+      Eigen::Matrix4f ndt_pose_matrix =  (map_init_pose.matrix().inverse() * t2.cast<double>()).cast<float>();
+      tf::Matrix3x3 mat_ndt; 
+      mat_ndt.setValue(static_cast<double>(ndt_pose_matrix(0, 0)), static_cast<double>(ndt_pose_matrix(0, 1)),
+                     static_cast<double>(ndt_pose_matrix(0, 2)), static_cast<double>(ndt_pose_matrix(1, 0)),
+                     static_cast<double>(ndt_pose_matrix(1, 1)), static_cast<double>(ndt_pose_matrix(1, 2)),
+                     static_cast<double>(ndt_pose_matrix(2, 0)), static_cast<double>(ndt_pose_matrix(2, 1)),
+                     static_cast<double>(ndt_pose_matrix(2, 2)));
+  
+      // Update ndt_pose
+      ndt_pose.x = ndt_pose_matrix(0, 3);
+      ndt_pose.y = ndt_pose_matrix(1, 3);
+      ndt_pose.z = ndt_pose_matrix(2, 3);
+      mat_b.getRPY(ndt_pose.roll, ndt_pose.pitch, ndt_pose.yaw, 1);
+    }
+    
 
     ndt_q.setRPY(ndt_pose.roll, ndt_pose.pitch, ndt_pose.yaw);
     if (_use_local_transform == true) {
@@ -1867,33 +1792,7 @@ int main(int argc, char** argv) {
       << "-----------------------------------------------------------------"
       << std::endl;
 
-#ifndef CUDA_FOUND
-  if (_method_type == MethodType::PCL_ANH_GPU) {
-    std::cerr
-        << "**************************************************************"
-        << std::endl;
-    std::cerr
-        << "[ERROR]PCL_ANH_GPU is not built. Please use other method type."
-        << std::endl;
-    std::cerr
-        << "**************************************************************"
-        << std::endl;
-    exit(1);
-  }
-#endif
-#ifndef USE_PCL_OPENMP
-  if (_method_type == MethodType::PCL_OPENMP) {
-    std::cerr
-        << "**************************************************************"
-        << std::endl;
-    std::cerr << "[ERROR]PCL_OPENMP is not built. Please use other method type."
-              << std::endl;
-    std::cerr
-        << "**************************************************************"
-        << std::endl;
-    exit(1);
-  }
-#endif
+
 
   Eigen::Translation3f tl_btol(_tf_x, _tf_y, _tf_z);  // tl: translation
   Eigen::AngleAxisf rot_x_btol(_tf_roll,

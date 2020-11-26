@@ -21,9 +21,9 @@
 #include <iostream>
 #include <string>
 
-#include "ceres_optimizer.h"
-#include "lidar_alignment/align_pointmatcher.h"
-#include "lidar_alignment/lidar_segmentation.h"
+#include "mapping_impl/ceres_optimizer.h"
+// #include "mapping_impl/align_pointmatcher.h"
+// #include "mapping_impl/lidar_segmentation.h"
 
 typedef pcl::PointXYZI PointT;
 typedef pcl::PointCloud<PointT> PointCloud;
@@ -92,9 +92,9 @@ pcl::VoxelGrid<PointT> voxel_filter;
 std::vector<KeyFramePtr> key_frame_ptrs;
 
 pcl::NormalDistributionsTransform<PointT, PointT> ndt_matching;
-AlignPointMatcher::Ptr align_pointmatcher_ptr;
+// AlignPointMatcher::Ptr align_pointmatcher_ptr;
 CeresOptimizer ceres_optimizer;
-LidarSegmentationPtr lidar_segmentation_ptr;
+// LidarSegmentationPtr lidar_segmentation_ptr;
 
 visualization_msgs::MarkerArray marker_array;
 
@@ -290,11 +290,11 @@ PointCloudPtr GenerateMap(double resolution = 0.05) {
 
 PointCloudPtr SegmentedCloud(PointCloudPtr cloud) {
   auto header = cloud->header;
-  lidar_segmentation_ptr->CloudMsgHandler(cloud);
+  // lidar_segmentation_ptr->CloudMsgHandler(cloud);
 
-  auto seg_cloud = lidar_segmentation_ptr->GetSegmentedCloudPure();
-  seg_cloud->header = header;
-  return seg_cloud;
+  // auto seg_cloud = lidar_segmentation_ptr->GetSegmentedCloudPure();
+  // seg_cloud->header = header;
+  // return seg_cloud;
 }
 
 bool AlignPointCloud(const PointCloudPtr& cloud_in, Eigen::Matrix4d& matrix,
@@ -332,10 +332,10 @@ bool AlignPointCloud(const PointCloudPtr& cloud_in, Eigen::Matrix4d& matrix,
     is_converged = ndt_matching.hasConverged();
     target_ptr = map_ptr;
   } else if (config.align_method == MethodType::ICP_ETH) {
-    if (!align_pointmatcher_ptr->Align<PointT>(target_ptr, source_ptr, matrix,
-                                               score)) {
-      score = std::numeric_limits<double>::max();
-    }
+    // if (!align_pointmatcher_ptr->Align<PointT>(target_ptr, source_ptr, matrix,
+    //                                            score)) {
+    //   score = std::numeric_limits<double>::max();
+    // }
     target_ptr->clear();
     pcl::copyPointCloud(*source_ptr, *target_ptr);
   }
@@ -647,7 +647,7 @@ void OutputParams() {
   LOG(INFO) << "map_cloud_update_interval:" << config.map_cloud_update_interval;
 }
 int main(int argc, char** argv) {
-  ros::init(argc, argv, "ceres_mapping");
+  ros::init(argc, argv, "lidar_mapping_ceres");
 
   ros::NodeHandle nh;
   ros::NodeHandle private_nh("~");
@@ -661,8 +661,8 @@ int main(int argc, char** argv) {
     ndt_matching.setMaximumIterations(config.ndt_maxiterations);
   }
 
-  lidar_segmentation_ptr.reset(new LidarSegmentation(config.seg_config_file));
-  align_pointmatcher_ptr.reset(new AlignPointMatcher(config.icp_config_file));
+  // lidar_segmentation_ptr.reset(new LidarSegmentation(config.seg_config_file));
+  // align_pointmatcher_ptr.reset(new AlignPointMatcher(config.icp_config_file));
   ceres_optimizer.SetConfig(config.ceres_config);
 
   // sub and pub

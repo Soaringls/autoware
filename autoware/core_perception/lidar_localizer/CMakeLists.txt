@@ -35,10 +35,10 @@ else()
   set(EIGEN3_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIR})
 endif()
 
-set(lidar_alignment_DIR "/autoware/workspace/install/lidar_alignment/share/lidar_alignment/cmake")
+# set(lidar_alignment_DIR "/autoware/workspace/install/lidar_alignment/share/lidar_alignment/cmake")
 find_package(catkin REQUIRED COMPONENTS
   ${PCL_OPENMP_PACKAGES}
-  lidar_alignment
+  # lidar_alignment
   autoware_config_msgs
   autoware_health_checker
   autoware_msgs
@@ -94,13 +94,13 @@ set(THIRD_DEPS
   ${CERES_LIBRARIES} 
   yaml-cpp glog
   # lidar_alignment 
-  /autoware/workspace/install/lidar_alignment/lib/liblidar_alignment.so
+  # /autoware/workspace/install/lidar_alignment/lib/liblidar_alignment.so
   
   ${Boost_LIBRARIES}
   ${libpointmatcher_LIBRARIES}
-  "/usr/local/lib/libpointmatcher.so.1.3.1"
-  "/usr/local/lib/libpointmatcher.so.1"
-  "/usr/local/lib/libpointmatcher.so"
+  # "/usr/local/lib/libpointmatcher.so.1.3.1"
+  # "/usr/local/lib/libpointmatcher.so.1"
+  # "/usr/local/lib/libpointmatcher.so"
 )
 
 add_executable(ndt_matching nodes/ndt_matching/ndt_matching.cpp)
@@ -164,11 +164,14 @@ target_link_libraries(ndt_matching_monitor ndt_matching_monitor_lib ${catkin_LIB
 add_executable(icp_matching nodes/icp_matching/icp_matching.cpp)
 target_link_libraries(icp_matching ${catkin_LIBRARIES})
 add_dependencies(icp_matching ${catkin_EXPORTED_TARGETS})
-
-add_executable(ceres_mapping nodes/lidar_localization/ceres_mapping.cc
-                             nodes/lidar_localization/ceres_optimizer.cpp
+###########################################################
+add_executable(lidar_mapping_ceres nodes/lidar_localization/lidar_mapping_ceres.cc
+                             nodes/lidar_localization/mapping_impl/ceres_optimizer.cpp
+                            #  nodes/lidar_localization/mapping_impl/align_pointmatcher.cc
+                            #  nodes/lidar_localization/mapping_impl/config_loader.cc
+                            #  nodes/lidar_localization/mapping_impl/lidar_segmentation.cc
 )
-target_link_libraries(ceres_mapping ${THIRD_DEPS})
+target_link_libraries(lidar_mapping_ceres ${THIRD_DEPS})
 
 add_executable(lidar_matching 
                nodes/lidar_localization/lidar_matching.cpp)
@@ -182,7 +185,7 @@ target_link_libraries(map_convert ${THIRD_DEPS})
 
 install(
   TARGETS
-    ceres_mapping  
+    lidar_mapping_ceres  
     lidar_matching 
   
     approximate_ndt_mapping

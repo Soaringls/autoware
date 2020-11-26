@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 
-#include "lidar_alignment/timer.h"
+#include "timer.h"
 
 using namespace lidar_alignment;
 struct POSE {

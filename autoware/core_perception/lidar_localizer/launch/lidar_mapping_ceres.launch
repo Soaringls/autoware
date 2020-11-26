@@ -12,7 +12,7 @@
   <arg name="voxel_filter_size" default="1" />        <!-- ndt 1.0   icp 0.1~0.2-->
   
   <!-- regis-->
-  <arg name="method_type" default="0" />              <!-- 0-PCL_GENERIC 4-ICP -->
+  <arg name="method_type" default="0" />              <!-- 0-PCL_GENERIC 1-ICP -->
   <!-- regis-ndt-config -->
   <arg name="ndt_trans_epsilon" default="0.01" />
   <arg name="ndt_step_size" default="0.1" />
@@ -27,11 +27,12 @@
   <arg name="optimize_num_every_scans" default="30" />
   <arg name="optimize_iter_num" default="60" />
   <arg name="optimize_var_anchor" default="0.8" />
-  <arg name="optimize_var_odom_t" default="0.2" />
-  <arg name="optimize_var_odom_q" default="0.2" />
+  <arg name="optimize_var_odom_t" default="0.7" />
+  <arg name="optimize_var_odom_q" default="0.7" />
   <!-- <arg name="optimize_var_anchor" default="0.8" />
   <arg name="optimize_var_odom_t" default="0.2" />
   <arg name="optimize_var_odom_q" default="0.02" /> -->
+  <arg name="map_init_position_file" default="/autoware/workspace/data/map/new_map_position.txt" />
   <arg name="map_cloud_update_interval" default="5" />   <!-- unit/second -->
   <arg name="keyframe_delta_trans" default="0.3" />
   <!--config over-->
@@ -39,14 +40,13 @@
   <!-- rosrun lidar_localizer ndt_mapping  -->
   <!-- <node pkg="lidar_localizer" type="queue_counter" name="queue_counter" output="screen"/> -->
   <!-- <node pkg="rviz" type="rviz" name="ceres_mapping_rviz" required="true" 
-      args = "-d /autoware/workspace/data/ceres_mapping.rviz" /> -->
+      args = "-d /autoware/workspace/data/lidar_mapping_ceres.rviz" /> -->
   
   <!-- nmea2tfpose -->
   <!-- <include file="$(find gnss_localizer)/launch/nmea2tfpose.launch"/> -->
 
   
-  <node pkg="lidar_localizer" type="ceres_mapping" name="ceres_mapping" output="screen" 
-    launch-prefix="xterm -e gdb -ex run --args" >
+  <node pkg="lidar_localizer" type="lidar_mapping_ceres" name="lidar_mapping_ceres" output="screen"   >
     <!-- time_config -->
     <param name="time_synchro_threshold" value="$(arg time_synchro_threshold)" />
     <param name="use_every_scan" value="$(arg use_every_scan)" />
@@ -75,6 +75,7 @@
     <param name="optimize_var_odom_t" value="$(arg optimize_var_odom_t)" />
     <param name="optimize_var_odom_q" value="$(arg optimize_var_odom_q)" />
     <!-- mapping -->
+    <param name="map_init_position_file" value="$(arg map_init_position_file)" />
     <param name="map_cloud_update_interval" value="$(arg map_cloud_update_interval)" />
     <param name="keyframe_delta_trans" value="$(arg keyframe_delta_trans)" />
   </node>
