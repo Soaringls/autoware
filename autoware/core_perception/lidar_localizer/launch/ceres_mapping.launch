@@ -12,7 +12,7 @@
   <arg name="voxel_filter_size" default="1" />        <!-- ndt 1.0   icp 0.1~0.2-->
   
   <!-- regis-->
-  <arg name="method_type" default="0" />              <!-- 0-PCL_GENERIC 1-ICP -->
+  <arg name="method_type" default="1" />              <!-- 0-PCL_GENERIC 1-ICP -->
   <!-- regis-ndt-config -->
   <arg name="ndt_trans_epsilon" default="0.01" />
   <arg name="ndt_step_size" default="0.1" />

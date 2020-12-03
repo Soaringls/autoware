@@ -80,6 +80,16 @@ void CeresOptimizer::Optimize() {
         to_optimized_q[i][3] = optimized_data_[i]->q.z();
 
         problem.AddParameterBlock(to_optimized_q[i], 4, local_parameterization);
+        // problem.AddParameterBlock(to_optimized_t[i], 3);
+
+        // test
+        // for(int j = 0; j < gps_data_.size(); ++j){
+        //   if(gps_data_[j]->time == optimized_data_[i]->time){
+        //     to_optimized_t[i][0] = gps_data_[j]->pos[0];
+        //     to_optimized_t[i][1] = gps_data_[j]->pos[1];
+        //     to_optimized_t[i][2] = gps_data_[j]->pos[2];
+        //   }
+        // }
         problem.AddParameterBlock(to_optimized_t[i], 3);
       }
 
@@ -124,6 +134,7 @@ void CeresOptimizer::Optimize() {
                     gps_data_[j]->pos.z(), config_.var_anchor);  // 0.05);
             problem.AddResidualBlock(cost_func_gps, loss_function_anchor,
                                      to_optimized_t[i]);
+            // problem.SetParameterBlockConstant(to_optimized_t[i]);
             break;
           }
         }
@@ -150,7 +161,8 @@ void CeresOptimizer::Optimize() {
                   .toRotationMatrix();
           W_BODY.block<3, 1>(0, 3) = Eigen::Vector3d(
               to_optimized_t[i][0], to_optimized_t[i][1], to_optimized_t[i][2]);
-          LOG(INFO) << "CeresOptimizer::Optimize()-W_BODY:" << W_BODY(0, 3)
+          LOG(INFO) << std::fixed << std::setprecision(6)
+                    << "CeresOptimizer::Optimize()-W_BODY:" << W_BODY(0, 3)
                     << ", " << W_BODY(1, 3) << ", " << W_BODY(2, 3);
         }
       }
@@ -179,9 +191,10 @@ void CeresOptimizer::AddPoseToNavPath(nav_msgs::Path& path, POSEPtr pose,
   pose_stamped.header.frame_id = frame_id;
 
   auto locla_pose = POSE2Affine(pose).matrix();
-  locla_pose(0, 3) -= init_pos_.matrix()(0, 3);
-  locla_pose(1, 3) -= init_pos_.matrix()(1, 3);
-  locla_pose(2, 3) -= init_pos_.matrix()(2, 3);
+  locla_pose = init_pos_.inverse() * locla_pose;
+  // locla_pose(0, 3) -= init_pos_.matrix()(0, 3);
+  // locla_pose(1, 3) -= init_pos_.matrix()(1, 3);
+  // locla_pose(2, 3) -= init_pos_.matrix()(2, 3);
   // auto pose_rviz = init_pos_.inverse() * POSE2Affine(pose);
   auto pose_rviz = Eigen::Affine3d(locla_pose);
   auto pose_rviz_p = Eigen::Translation3d(pose_rviz.translation());

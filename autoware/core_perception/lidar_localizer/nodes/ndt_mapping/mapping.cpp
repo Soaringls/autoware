@@ -239,6 +239,19 @@ void VoxelFilter(PointCloudPtr& cloud, const double size) {
             << ", cloud:" << cloud->size();
 }
 
+PointCloudPtr VoxelFilter(const PointCloudPtr& cloud, const double size) {
+  // voxel filter
+  auto pts = cloud->size();
+  PointCloudPtr filtered_scan_ptr(new PointCloud());
+  pcl::VoxelGrid<pcl::PointXYZI> voxel_grid_filter;
+  voxel_grid_filter.setLeafSize(size, size, size);
+  voxel_grid_filter.setInputCloud(cloud);
+  voxel_grid_filter.filter(*filtered_scan_ptr);
+  filtered_scan_ptr->header = cloud->header;
+  LOG(INFO) << "origin:" << pts << ", filtered:" << filtered_scan_ptr->size();
+  return filtered_scan_ptr;
+}
+
 void AddKeyFrame(const double& time, const Eigen::Matrix4d& tf,
                  const Eigen::Matrix4d& pose, const PointCloudPtr cloud) {
   // publish current frame

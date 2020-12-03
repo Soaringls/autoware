@@ -150,7 +150,7 @@ struct OdomCostFunction {
     residuals[3] = T(2) * error_q[1] / T(var_q_);
     residuals[4] = T(2) * error_q[2] / T(var_q_);
     residuals[5] = T(2) * error_q[3] / T(var_q_);
-    // residuals[6] = T(2) * error_q[4] / T(var_q_);
+    residuals[6] = T(2) * error_q[4] / T(var_q_);
 
     return true;
   }
@@ -159,9 +159,12 @@ struct OdomCostFunction {
                                      const double tf_qx, const double tf_qy,
                                      const double tf_qz, const double var_t,
                                      const double var_q) {
-    return (new ceres::AutoDiffCostFunction<OdomCostFunction, 6, 4, 3, 4, 3>(
+    return (new ceres::AutoDiffCostFunction<OdomCostFunction, 7, 4, 3, 4, 3>(
         new OdomCostFunction(tf_x, tf_y, tf_z, tf_qw, tf_qx, tf_qy, tf_qz,
                              var_t, var_q)));
+    // return (new ceres::AutoDiffCostFunction<OdomCostFunction, 3, 4, 3, 4, 3>(
+    //     new OdomCostFunction(tf_x, tf_y, tf_z, tf_qw, tf_qx, tf_qy, tf_qz,
+    //                          var_t, var_q)));
   }
 
   double tf_x_, tf_y_, tf_z_;

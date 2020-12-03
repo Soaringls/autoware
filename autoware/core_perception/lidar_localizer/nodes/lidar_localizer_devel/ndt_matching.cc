@@ -268,7 +268,7 @@ void SetMapInitPos(const std::string& map_init_filename) {
       LOG(FATAL) << "there is empty in the file!";
     }
     // map_init_pos = Eigen::Vector3d(std::stod(parts[0]), std::stod(parts[1]),
-    // std::stod(parts[2]));
+    // std::stod(parts[2]));//w x y z
     Eigen::Quaterniond q(std::stod(parts[3]), std::stod(parts[4]),
                          std::stod(parts[5]), std::stod(parts[6]));
 
