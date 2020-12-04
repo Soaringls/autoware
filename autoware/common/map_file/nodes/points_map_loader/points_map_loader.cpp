@@ -538,7 +538,7 @@ int main(int argc, char** argv)
 
   if (margin < 0)
   {
-    can_download = false;
+    can_download = false;//go
   }
   else
   {
@@ -573,7 +573,7 @@ int main(int argc, char** argv)
   ros::Subscriber waypoints_sub;
   if (margin < 0)
   {
-    int err = 0;
+    int err = 0;//go
     publish_pcd(create_pcd(pcd_file_paths, &err), &err);
   }
   else

@@ -20,6 +20,8 @@
  Yuki KITSUKAWA
  */
 
+#include <autoware_config_msgs/ConfigNDT.h>
+#include <autoware_msgs/NDTStat.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <geometry_msgs/TwistStamped.h>
 #include <glog/logging.h>
@@ -31,6 +33,8 @@
 #include <pcl/point_types.h>
 #include <pcl/registration/ndt.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl_ros/transforms.h>
 #include <pthread.h>
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
@@ -54,12 +58,6 @@
 #include <queue>
 #include <sstream>
 #include <string>
-
-
-#include <autoware_config_msgs/ConfigNDT.h>
-#include <autoware_msgs/NDTStat.h>
-#include <pcl_ros/point_cloud.h>
-#include <pcl_ros/transforms.h>
 
 // headers in Autoware Health Checker
 #include <autoware_health_checker/health_checker/health_checker.h>
@@ -120,8 +118,6 @@ static Eigen::Affine3d map_init_pose = Eigen::Affine3d::Identity();
 static pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt;
 static cpu::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> anh_ndt;
 
-
-
 // Default values
 static int max_iter = 30;        // Maximum iterations
 static float ndt_res = 1.0;      // Resolution
@@ -148,6 +144,7 @@ static geometry_msgs::PoseStamped ndt_pose_msg;
 static ros::Publisher current_pose_pub;
 static geometry_msgs::PoseStamped current_pose_msg;
  */
+static ros::Publisher pub_current_pts;
 static ros::Publisher gps_path_pub;
 static ros::Publisher lio_path_pub;
 
@@ -283,10 +280,10 @@ void AddPoseToNavPath(nav_msgs::Path& path, const Eigen::Affine3d& pose,
   pose_stamped.pose.position.x = t.x();
   pose_stamped.pose.position.y = t.y();
   pose_stamped.pose.position.z = t.z();
-  pose_stamped.pose.orientation.w = q.w();       // pose->q.w();
-  pose_stamped.pose.orientation.x = q.x();       // pose->q.x();
-  pose_stamped.pose.orientation.y = q.y();       // pose->q.y();
-  pose_stamped.pose.orientation.z = q.z();       // pose->q.z();
+  pose_stamped.pose.orientation.w = q.w();  // pose->q.w();
+  pose_stamped.pose.orientation.x = q.x();  // pose->q.x();
+  pose_stamped.pose.orientation.y = q.y();  // pose->q.y();
+  pose_stamped.pose.orientation.z = q.z();  // pose->q.z();
   path.header = pose_stamped.header;
   path.poses.push_back(pose_stamped);
 }
@@ -310,8 +307,8 @@ void AddPoseToNavPath(nav_msgs::Path& path, const pose& pose,
 }
 
 void Clear(std::queue<geometry_msgs::PoseStamped::ConstPtr>& q) {
-	std::queue<geometry_msgs::PoseStamped::ConstPtr> empty;
-	std::swap(empty, q);
+  std::queue<geometry_msgs::PoseStamped::ConstPtr> empty;
+  std::swap(empty, q);
 }
 
 bool FindCorrespondGpsMsg(const double pts_stamp, Eigen::Affine3d& ins_pose) {
@@ -393,7 +390,6 @@ static void param_callback(
       ndt.setResolution(ndt_res);
     else if (_method_type == MethodType::PCL_ANH)
       anh_ndt.setResolution(ndt_res);
-
   }
 
   if (input->step_size != step_size) {
@@ -403,7 +399,6 @@ static void param_callback(
       ndt.setStepSize(step_size);
     else if (_method_type == MethodType::PCL_ANH)
       anh_ndt.setStepSize(step_size);
-
   }
 
   if (input->trans_epsilon != trans_eps) {
@@ -413,7 +408,6 @@ static void param_callback(
       ndt.setTransformationEpsilon(trans_eps);
     else if (_method_type == MethodType::PCL_ANH)
       anh_ndt.setTransformationEpsilon(trans_eps);
-
   }
 
   if (input->max_iterations != max_iter) {
@@ -423,7 +417,6 @@ static void param_callback(
       ndt.setMaximumIterations(max_iter);
     else if (_method_type == MethodType::PCL_ANH)
       anh_ndt.setMaximumIterations(max_iter);
-
   }
 
   if (_use_gnss == 0 && init_pos_set == 0) {
@@ -598,12 +591,11 @@ static void gnss_callback(const geometry_msgs::PoseStamped::ConstPtr& input) {
   gps_msgs.push(input);
   gps_mutex.unlock();
 
-  Eigen::Affine3d current_ins =  
-        Eigen::Translation3d(input->pose.position.x, input->pose.position.y,
-                             input->pose.position.z) *
-        Eigen::Quaterniond(input->pose.orientation.w, input->pose.orientation.x,
-                           input->pose.orientation.y,
-                           input->pose.orientation.z);
+  Eigen::Affine3d current_ins =
+      Eigen::Translation3d(input->pose.position.x, input->pose.position.y,
+                           input->pose.position.z) *
+      Eigen::Quaterniond(input->pose.orientation.w, input->pose.orientation.x,
+                         input->pose.orientation.y, input->pose.orientation.z);
   if (!init_flag) {
     init_pose = current_ins;
     init_flag = true;
@@ -623,7 +615,7 @@ static void gnss_callback(const geometry_msgs::PoseStamped::ConstPtr& input) {
 
   static nav_msgs::Path ins_path;
   // AddPoseToNavPath(ins_path, current_gnss_pose);
-  AddPoseToNavPath(ins_path, map_init_pose.inverse()*current_ins);
+  AddPoseToNavPath(ins_path, map_init_pose.inverse() * current_ins);
   gps_path_pub.publish(ins_path);  // pub ins path
 
   static pose previous_gnss_pose = current_gnss_pose;
@@ -1077,7 +1069,6 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
     else if (_method_type == MethodType::PCL_ANH)
       anh_ndt.setInputSource(filtered_scan_ptr);
 
-
     // Guess the initial gross estimation of the transformation
     double diff_time = (current_scan_time - previous_scan_time).toSec();
 
@@ -1161,10 +1152,12 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
       trans_probability = ndt.getTransformationProbability();
 
       // LOG(INFO) << std::fixed << std::setprecision(6)
-      //           << "init guess:" << init_guess(0, 3) << ", " << init_guess(1, 3)
+      //           << "init guess:" << init_guess(0, 3) << ", " << init_guess(1,
+      //           3)
       //           << ", score:" << fitness_score;
       LOG(INFO) << std::fixed << std::setprecision(6)
-                << "ndt result:" << t(0, 3) << ", " << t(1, 3)<< ", score:" << fitness_score;
+                << "ndt result:" << t(0, 3) << ", " << t(1, 3)
+                << ", score:" << fitness_score;
     } else if (_method_type == MethodType::PCL_ANH) {
       align_start = std::chrono::system_clock::now();
       anh_ndt.align(init_guess);
@@ -1212,8 +1205,18 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
 
     static nav_msgs::Path lio_path;
     // AddPoseToNavPath(lio_path, localizer_pose);
-    AddPoseToNavPath(lio_path, Eigen::Affine3d(map_init_pose.matrix().inverse() * t.cast<double>()));
+    Eigen::Affine3d cur_lio_pose =
+        Eigen::Affine3d(map_init_pose.matrix().inverse() * t.cast<double>());
+    AddPoseToNavPath(lio_path, cur_lio_pose);
     lio_path_pub.publish(lio_path);  // pub lio path
+
+    // pub current cloud
+    pcl::PointCloud<pcl::PointXYZ> current_cloud;
+    pcl::transformPointCloud(filtered_scan, current_cloud, cur_lio_pose);
+    current_cloud.header.frame_id = "world";
+    sensor_msgs::PointCloud2 output_current;
+    pcl::toROSMsg(current_cloud, output_current);
+    pub_current_pts.publish(output_current);
 
     tf::Matrix3x3 mat_b;  // base_link   ndt_pose == t2 即cur_pose
     mat_b.setValue(static_cast<double>(t2(0, 0)), static_cast<double>(t2(0, 1)),
@@ -1408,23 +1411,27 @@ static void points_callback(const sensor_msgs::PointCloud2::ConstPtr& input) {
     predict_pose_imu_odom_msg.pose.orientation.w = predict_q_imu_odom.w();
     predict_pose_imu_odom_pub.publish(predict_pose_imu_odom_msg);
 
-    //local pose
+    // local pose
     if (local_coordinationg == true) {
-      Eigen::Matrix4f ndt_pose_matrix =  (map_init_pose.matrix().inverse() * t2.cast<double>()).cast<float>();
-      tf::Matrix3x3 mat_ndt; 
-      mat_ndt.setValue(static_cast<double>(ndt_pose_matrix(0, 0)), static_cast<double>(ndt_pose_matrix(0, 1)),
-                     static_cast<double>(ndt_pose_matrix(0, 2)), static_cast<double>(ndt_pose_matrix(1, 0)),
-                     static_cast<double>(ndt_pose_matrix(1, 1)), static_cast<double>(ndt_pose_matrix(1, 2)),
-                     static_cast<double>(ndt_pose_matrix(2, 0)), static_cast<double>(ndt_pose_matrix(2, 1)),
-                     static_cast<double>(ndt_pose_matrix(2, 2)));
-  
+      Eigen::Matrix4f ndt_pose_matrix =
+          (map_init_pose.matrix().inverse() * t2.cast<double>()).cast<float>();
+      tf::Matrix3x3 mat_ndt;
+      mat_ndt.setValue(static_cast<double>(ndt_pose_matrix(0, 0)),
+                       static_cast<double>(ndt_pose_matrix(0, 1)),
+                       static_cast<double>(ndt_pose_matrix(0, 2)),
+                       static_cast<double>(ndt_pose_matrix(1, 0)),
+                       static_cast<double>(ndt_pose_matrix(1, 1)),
+                       static_cast<double>(ndt_pose_matrix(1, 2)),
+                       static_cast<double>(ndt_pose_matrix(2, 0)),
+                       static_cast<double>(ndt_pose_matrix(2, 1)),
+                       static_cast<double>(ndt_pose_matrix(2, 2)));
+
       // Update ndt_pose
       ndt_pose.x = ndt_pose_matrix(0, 3);
       ndt_pose.y = ndt_pose_matrix(1, 3);
       ndt_pose.z = ndt_pose_matrix(2, 3);
       mat_b.getRPY(ndt_pose.roll, ndt_pose.pitch, ndt_pose.yaw, 1);
     }
-    
 
     ndt_q.setRPY(ndt_pose.roll, ndt_pose.pitch, ndt_pose.yaw);
     if (_use_local_transform == true) {
@@ -1792,8 +1799,6 @@ int main(int argc, char** argv) {
       << "-----------------------------------------------------------------"
       << std::endl;
 
-
-
   Eigen::Translation3f tl_btol(_tf_x, _tf_y, _tf_z);  // tl: translation
   Eigen::AngleAxisf rot_x_btol(_tf_roll,
                                Eigen::Vector3f::UnitX());  // rot: rotation
@@ -1848,7 +1853,8 @@ int main(int argc, char** argv) {
       nh.subscribe("/vehicle/odom", _queue_size * 10, odom_callback);
   ros::Subscriber imu_sub =
       nh.subscribe(_imu_topic.c_str(), _queue_size * 10, imu_callback);
-
+  pub_current_pts =
+      nh.advertise<sensor_msgs::PointCloud2>("/lidar_locator/cur_cloud", 100);
   gps_path_pub = nh.advertise<nav_msgs::Path>("/lidar_locator/path/ins", 100);
   lio_path_pub = nh.advertise<nav_msgs::Path>("/lidar_locator/path/lio", 100);
 
