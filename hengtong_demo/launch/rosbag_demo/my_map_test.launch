@@ -1,0 +1,15 @@
+<launch>
+
+  <!-- TF -->
+  <include file="/autoware/workspace/data/tf/tf_hentong.launch"/>
+
+  <!-- Point Cloud -->
+  <node pkg="map_file" type="points_map_loader" name="points_map_loader" >
+  <rosparam subst_value="true">
+    pcd_paths: ["/autoware/workspace/data/hengtong_map1112/"]
+  </rosparam>
+ </node>
+  <!-- Vector Map -->
+  <!-- <node pkg="map_file" type="vector_map_loader" name="vector_map_loader" args="/autoware/workspace/data/hengtong_map1112/vector_map/lane.csv /autoware/workspace/data/hengtong_map1112/vector_map/line.csv  /autoware/workspace/data/hengtong_map1112/vector_map/node.csv  /autoware/workspace/data/hengtong_map1112/vector_map/point.csv     /autoware/workspace/data/hengtong_map1112/vector_map/whiteline.csv  /autoware/workspace/data/hengtong_map1112/vector_map/dtlane.csv   /autoware/workspace/data/hengtong_map1112/vector_map/roadsign.csv /autoware/workspace/data/hengtong_map1112/vector_map/roadedge.csv "/> -->
+
+</launch>

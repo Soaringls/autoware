@@ -1,0 +1,7 @@
+<launch>
+  <node pkg="tf"
+    type="static_transform_publisher"
+    name="world_to_map"
+    args="4425349.110374 -456611.694929 25.218700 0 0 0 /world /map 10"
+    />
+</launch>
